@@ -6,6 +6,8 @@ extends Control
 ## 所有改动即时生效并落盘，没有「确定」按钮。
 
 signal closed
+## 鼠标映射改动：HUD 的提示行要跟着重写
+signal mouse_changed
 
 const GAP_MIN := 12
 const GAP_MAX := 55
@@ -307,6 +309,7 @@ func _on_mute(pressed: bool) -> void:
 func _on_mouse_changed(slot: int, index: int) -> void:
 	AppSettings.mouse_map[slot] = clampi(index, 0, 4)
 	AppSettings.save()
+	mouse_changed.emit()
 
 
 func _on_vsync(pressed: bool) -> void:

@@ -35,6 +35,8 @@ func _process(_delta: float) -> bool:
 			_test_chord_pick()
 		20:
 			_scene._timing = true
+		25:
+			_test_audit_fixes()
 		26:
 			_test_settings_page()
 		22:
@@ -42,6 +44,8 @@ func _process(_delta: float) -> bool:
 		24:
 			_check(_scene._elapsed > 0.0, "计时应在 _timing 为真时累加，实际 %.3f" % _scene._elapsed)
 			_scene._timing = false
+		27:
+			_test_overlay_blocking()
 		28:
 			print("")
 			# 测试脚本直接退出，引擎会报 ObjectDB 泄漏；主场景正常退出时是干净的
@@ -253,6 +257,27 @@ func _move(pos: Vector2) -> void:
 
 
 ## 选项页：改动即时生效并落盘
+## 代码审查后补的回归项
+func _test_audit_fixes() -> void:
+	# 间距要落盘
+	_scene._on_spacing_changed(130.0)
+	var cfg := ConfigFile.new()
+	_check(cfg.load(AppSettings.PATH) == OK, "配置文件应可读")
+	_check(int(cfg.get_value("view", "spacing", -1)) == 130,
+		"间距应落盘为 130，实际 %s" % str(cfg.get_value("view", "spacing", -1)))
+
+	# 拉开间距后六个面都算可见
+	var any_cell: int = 0
+	_check(_scene._face_mask(any_cell) == 63, "间距 130% 时所有面都应可见")
+	_scene._on_spacing_changed(100.0)
+
+	# 换局应把视角中心复位
+	_scene.camera_rig.pivot = Vector3(3, 0, 3)
+	_scene.new_game()
+	_check(_scene.camera_rig.pivot.is_equal_approx(Vector3.ZERO),
+		"换局应复位视角中心，实际 %s" % str(_scene.camera_rig.pivot))
+
+
 func _test_settings_page() -> void:
 	var page: SettingsPage = _scene.settings_page
 	page.open()
@@ -275,17 +300,45 @@ func _test_settings_page() -> void:
 	_check(is_equal_approx(AppSettings.pitch(), 1.5), "倍率应为 1.5，实际 %.2f" % AppSettings.pitch())
 	_check(is_equal_approx(AppSettings.revealed_size(), 0.70),
 		"间距不应改变方块尺寸，实际 %.2f" % AppSettings.revealed_size())
-	_check(is_equal_approx(_scene.cells[corner]._box.size.x, 0.70),
-		"碰撞盒也不该变，实际 %.2f" % _scene.cells[corner]._box.size.x)
+	# 手动摆一个已揭示格，避免依赖前面测试留下的盘面状态
+	_scene.cells[corner].apply(BoardLogic.REVEALED, 3, 63, [1, 1, 1, 1, 1, 1])
+	_check(is_equal_approx(_scene.cells[corner]._box.size.x, AppSettings.revealed_size()),
+		"已揭示格的碰撞盒应跟随 revealed_size()，实际 %.2f" % _scene.cells[corner]._box.size.x)
 	var gap: float = (_scene.cells[corner].position - _scene.cells[neighbor].position).length()
 	_check(is_equal_approx(gap, 1.5), "相邻方块中心距应为 1.5，实际 %.2f" % gap)
 	_check(not before_pos.is_equal_approx(_scene.cells[corner].position), "方块位置应随间距变化")
 	_scene._on_spacing_changed(100.0)
-	_check(is_equal_approx(AppSettings.pitch(), 1.0), "回到 100%% 时倍率应为 1.0")
+	_check(is_equal_approx(AppSettings.pitch(), 1.0), "回到 100% 时倍率应为 1.0")
 
 	page._on_volume(70.0)
 	page.close()
 	_check(not page.visible, "选项页应能关闭")
+
+
+## 浮层打开时挡住棋盘输入；Esc 只关最上面那层
+func _test_overlay_blocking() -> void:
+	var logic = _scene.logic
+	var before: int = logic.revealed_count
+
+	_scene.settings_page.open()
+	_check(_scene._ui_blocking(), "选项页打开时应阻挡棋盘输入")
+
+	var cam: Camera3D = _scene.camera_rig.camera
+	var idx: int = logic.index_of(Vector3i(0, 0, 0))
+	var screen := cam.unproject_position(_scene.cells[idx].global_position)
+	_press(MOUSE_BUTTON_LEFT, screen)
+	_release(MOUSE_BUTTON_LEFT, screen)
+	_check(logic.revealed_count == before, "浮层打开时点击不应翻开格子")
+
+	_scene.settings.open(5, 12)
+	_check(_scene.settings.visible and _scene.settings_page.visible, "两层应同时打开")
+	_check(_scene._close_top_overlay(), "Esc 应关掉一层")
+	_check(not _scene.settings_page.visible, "先关的是后加的选项页")
+	_check(_scene.settings.visible, "开局浮层应仍然打开")
+
+	_scene._close_top_overlay()
+	_check(not _scene.settings.visible, "再关一次应关掉开局浮层")
+	_check(not _scene._ui_blocking(), "全部关闭后不应再阻挡输入")
 
 
 func _check(cond: bool, msg: String) -> void:

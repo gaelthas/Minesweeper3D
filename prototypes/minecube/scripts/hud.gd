@@ -104,13 +104,11 @@ func _ready() -> void:
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(spacer)
 
-	_hint = UiKit.label(
-		t("左键揭示 · 右键插旗 · 中键拖拽平移 · 左右键同按和弦 · 拖拽旋转 · 滚轮缩放 · R 重开 · M 静音",
-			"LMB reveal · RMB flag · LMB+RMB chord · drag orbit · wheel zoom · R restart · M mute"),
-		14, UiKit.INK_SOFT)
+	_hint = UiKit.label("", 14, UiKit.INK_SOFT)
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(_hint)
 
+	refresh_hint()
 	set_status(t("点击任意方块开始", "click any cube to begin"))
 
 
@@ -175,6 +173,32 @@ func _build_spacing_row() -> HBoxContainer:
 	line.add_child(_spacing_label)
 
 	return line
+
+
+## 提示行按当前的鼠标映射生成——改了键位就不会再显示错的提示
+func refresh_hint() -> void:
+	if _hint == null:
+		return
+	var names := ["左键", "中键", "右键"]
+	var acts := []
+	for i in 3:
+		var a: int = AppSettings.mouse_map[i]
+		if a == AppSettings.MouseAction.NONE:
+			continue
+		var verb := ""
+		match a:
+			AppSettings.MouseAction.REVEAL:
+				verb = t("揭示", "reveal")
+			AppSettings.MouseAction.FLAG:
+				verb = t("插旗", "flag")
+			AppSettings.MouseAction.CHORD:
+				verb = t("和弦", "chord")
+			AppSettings.MouseAction.PAN:
+				verb = t("平移", "pan")
+		acts.append("%s %s" % [t(names[i], names[i]), verb])
+	var tail := t("左右键同按和弦 · 拖拽旋转 · 滚轮缩放 · R 重开 · M 静音",
+		"LMB+RMB chord · drag orbit · wheel zoom · R restart · M mute")
+	_hint.text = " · ".join(acts) + " · " + tail
 
 
 func set_spacing(value: int) -> void:

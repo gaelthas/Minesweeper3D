@@ -36,19 +36,19 @@ static var volume: int = 70
 static var muted: bool = false
 static var vsync: bool = true
 static var show_fps: bool = false
-## 已揭示方块相对未揭示格的收缩量：30 表示缩到成 0.70。
-## 界面上只暴露「间距」一个滑块（整体缩放），这个比例是固定的。
+## 已揭示方块相对未揭示格的收缩量：30 表示缩到 0.70。
+## 界面上不暴露它——想看清内层靠拉大间距，而不是把方块缩小。
 const PEEK_GAP := 30
 
-## 未揭示方块的标称边长。实际尺寸还要乘上间距系数。
+## 未揭示方块的标称边长。间距只挪位置，不改尺寸。
 const NOMINAL_SIZE := 0.88
 
 ## 三个鼠标键各自的功能，顺序 左 / 中 / 右
 enum MouseAction { NONE, REVEAL, FLAG, CHORD, PAN }
 static var mouse_map: Array[int] = [MouseAction.REVEAL, MouseAction.PAN, MouseAction.FLAG]
 
-## 方块中心距的倍率：100% 是原始格距 1.0，调到 180% 方块之间拉开一倍多。
-## 注意它只动位置，不动方块尺寸。
+## 方块中心距的倍率：100% 是原始格距 1.0，最大 200%。
+## 只动位置，不动方块尺寸。
 static var spacing: int = 100
 
 
@@ -67,7 +67,6 @@ static func hidden_size() -> float:
 
 static func revealed_size() -> float:
 	return revealed_ratio()
-
 
 
 static func action_for(button: int) -> int:
@@ -96,6 +95,7 @@ static func load_from_disk() -> void:
 	mouse_map[2] = clampi(int(cfg.get_value("input", "right", mouse_map[2])), 0, 4)
 	vsync = bool(cfg.get_value("display", "vsync", vsync))
 	show_fps = bool(cfg.get_value("display", "show_fps", show_fps))
+	spacing = clampi(int(cfg.get_value("view", "spacing", spacing)), 100, 200)
 
 	# 换了显示器之后存档里的尺寸可能不再可用，退回默认值
 	var avail := available_resolutions()
@@ -110,6 +110,7 @@ static func save() -> void:
 	cfg.set_value("display", "size_h", window_size.y)
 	cfg.set_value("display", "vsync", vsync)
 	cfg.set_value("display", "show_fps", show_fps)
+	cfg.set_value("view", "spacing", spacing)
 	cfg.set_value("input", "left", mouse_map[0])
 	cfg.set_value("input", "middle", mouse_map[1])
 	cfg.set_value("input", "right", mouse_map[2])

@@ -43,6 +43,12 @@ func pan(relative: Vector2) -> void:
 	_apply()
 
 
+## 回到默认观察中心（换局时用）
+func reset_view() -> void:
+	pivot = Vector3.ZERO
+	_apply()
+
+
 func zoom(amount: float) -> void:
 	distance = clampf(distance + amount, min_distance, max_distance)
 	_apply()

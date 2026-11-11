@@ -20,6 +20,7 @@ func _initialize() -> void:
 	_test_face_expansion()
 	_test_center_degeneracy_3cubed()
 	_test_face_counts()
+	_test_face_invariants()
 
 	print("")
 	if _fails == 0:
@@ -375,3 +376,56 @@ func _test_face_counts() -> void:
 	# 面邻域是平面内的 3×3 去心，最多 8 格
 	_check(b.face_neighbors(b.index_of(Vector3i(1, 1, 1)), 0).size() == 8, "体心的面邻域应有 8 格")
 	_check(BL.FACE_AXIS == [2, 2, 0, 0, 1, 1], "面法线轴顺序应与 CellView._faces 一致")
+
+## 随机盘面上锁死几条不变量。
+## 六面之和不是 4×26 计数：每颗雷按"与格子共享几个坐标平面"加权，
+## 轴向邻格共享 2 个平面（4 面）、棱对角共享 1 个（2 面）、体对角 0 个（0 面）。
+func _test_face_invariants() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20261111
+	var checked := 0
+	var bad_range := 0
+	var bad_sum := 0
+	var bad_axis := 0
+	for trial in 40:
+		var side := 3 + trial % 5
+		var total := side * side * side
+		var b := BL.new(Vector3i(side, side, side), maxi(2, int(total * 0.3)))
+		b.place_mines(rng.randi_range(0, total - 1), rng)
+		for i in total:
+			if b.mines[i] == 1:
+				continue
+			checked += 1
+			var fc := b.face_counts_of(i)
+			for v in fc:
+				if v < 0 or v > 8:
+					bad_range += 1
+
+			# 按邻格类型算应有的加权和
+			var c := b.coord_of(i)
+			var expect := 0
+			for off in [Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 1, 0),
+					Vector3i(0, -1, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1),
+					Vector3i(1, 1, 0), Vector3i(1, -1, 0), Vector3i(-1, 1, 0), Vector3i(-1, -1, 0),
+					Vector3i(1, 0, 1), Vector3i(1, 0, -1), Vector3i(-1, 0, 1), Vector3i(-1, 0, -1),
+					Vector3i(0, 1, 1), Vector3i(0, 1, -1), Vector3i(0, -1, 1), Vector3i(0, -1, -1)]:
+				var o: Vector3i = off
+				var q: Vector3i = c + o
+				if b.in_bounds(q) and b.mines[b.index_of(q)] == 1:
+					# 只有一个分量为 1 → 轴向邻格，共享两个平面 → 4 面
+					var nz := absi(o.x) + absi(o.y) + absi(o.z)
+					expect += 4 if nz == 1 else 2
+			# 体对角邻格不进任何面，权重 0，不参与
+			var sum := 0
+			for v in fc:
+				sum += v
+			if sum != expect:
+				bad_sum += 1
+
+			if fc[0] != fc[1] or fc[2] != fc[3] or fc[4] != fc[5]:
+				bad_axis += 1
+
+	_check(checked > 1000, "应覆盖足够多的非雷格，实际 %d" % checked)
+	_check(bad_range == 0, "面计数越界，共 %d 处" % bad_range)
+	_check(bad_sum == 0, "六面之和与类型加权和不等，共 %d 处" % bad_sum)
+	_check(bad_axis == 0, "同一轴两面数值应相同，共 %d 处不一致" % bad_axis)

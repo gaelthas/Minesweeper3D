@@ -5,6 +5,8 @@ extends Node3D
 const DRAG_THRESHOLD := 4.0
 ## 和弦手势的位移容差：按下第二个键时若还在这个范围内，撤销之前的拖拽判定
 const CHORD_SLOP := 14.0
+## 格距超过这个倍率时，方块之间的缝已经宽到能看见所有面
+const OPEN_VIEW_PITCH := 1.15
 
 var board_side := 5
 var mine_count := 38
@@ -15,6 +17,7 @@ var camera_rig: CameraRig
 var hud: Hud
 var settings: SettingsPanel
 var settings_page: SettingsPage
+var overlay: CanvasLayer
 var result_panel: ResultPanel
 var sfx: Sfx
 
@@ -24,6 +27,8 @@ var _board_root: Node3D
 var _press_pos := Vector2.ZERO
 var _dragging := false
 var _framed_side := 0
+## 间距是否已经宽到所有面都看得见；跨过阈值时要重刷全部格子
+var _open_view := false
 
 var _down := {}
 var _chord_armed := false
@@ -57,11 +62,9 @@ func _ready() -> void:
 	hud.options_pressed.connect(_open_options)
 	hud.spacing_changed.connect(_on_spacing_changed)
 	hud.set_spacing(AppSettings.spacing)
-	hud.spacing_changed.connect(_on_spacing_changed)
-	hud.set_spacing(AppSettings.spacing)
 	hud.quit_pressed.connect(_quit)
 
-	var overlay := CanvasLayer.new()
+	overlay = CanvasLayer.new()
 	overlay.name = "Overlay"
 	overlay.layer = 2
 	add_child(overlay)
@@ -76,6 +79,7 @@ func _ready() -> void:
 	settings_page.name = "SettingsPage"
 	settings_page.setup()
 	overlay.add_child(settings_page)
+	settings_page.mouse_changed.connect(hud.refresh_hint)
 
 	result_panel = ResultPanel.new()
 	result_panel.name = "Result"
@@ -99,6 +103,18 @@ func _process(delta: float) -> void:
 	if _timing and logic != null and not logic.game_over:
 		_elapsed += delta
 		hud.set_time(_elapsed)
+
+
+## 按叠加顺序（后加的在上）关掉最上面那层，而不是按固定优先级
+func _close_top_overlay() -> bool:
+	if overlay == null:
+		return false
+	for i in range(overlay.get_child_count() - 1, -1, -1):
+		var c: Node = overlay.get_child(i)
+		if c is Control and (c as Control).visible and c.has_method("close"):
+			c.close()
+			return true
+	return false
 
 
 func _ui_blocking() -> bool:
@@ -174,6 +190,8 @@ func new_game() -> void:
 	if _framed_side != board_side:
 		camera_rig.frame(board_size)
 		_framed_side = board_side
+	else:
+		camera_rig.reset_view()
 
 	_elapsed = 0.0
 	_timing = false
@@ -219,6 +237,9 @@ func _on_restart() -> void:
 
 func _open_options() -> void:
 	sfx.ui()
+	if _timing:
+		_paused_for_settings = true
+		_timing = false
 	settings_page.open()
 
 
@@ -329,12 +350,7 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if k.keycode == KEY_ESCAPE:
-		if settings != null and settings.visible:
-			settings.close()
-		elif result_panel != null and result_panel.visible:
-			result_panel.close()
-		elif settings_page != null and settings_page.visible:
-			settings_page.close()
+		_close_top_overlay()
 		return
 
 	if _ui_blocking():
@@ -476,6 +492,18 @@ func _on_spacing_changed(value: float) -> void:
 	AppSettings.save()
 	hud.set_spacing(AppSettings.spacing)
 	_relayout_cells()
+	_sync_open_view()
+
+
+## 跨过「所有面都看得见」的阈值时，可见面集合变了，得重刷全部格子。
+## 只在跨越那一下刷，拖动过程中不逐帧重建。
+func _sync_open_view() -> void:
+	var open := AppSettings.pitch() >= OPEN_VIEW_PITCH
+	if open == _open_view:
+		return
+	_open_view = open
+	for c in cells:
+		_refresh(c.index)
 
 
 ## 按当前间距重新摆放所有方块——只动位置，方块尺寸不变
@@ -491,14 +519,6 @@ func _relayout_cells() -> void:
 	for c in cells:
 		var p := logic.coord_of(c.index)
 		c.position = origin + Vector3(p) * pitch
-
-
-## 间距或缝隙改了之后，所有方块都要按新尺寸重画一遍
-func _refresh_all_cells() -> void:
-	if logic == null:
-		return
-	for c in cells:
-		_refresh(c.index)
 
 
 func _refresh(i: int) -> void:
@@ -520,7 +540,10 @@ func _refresh_area(indices: Array) -> void:
 
 
 ## 只有朝盘面外、或朝向已揭示格的面才印数字。
+## 间距拉开后每条缝都够宽，六个面都能看见，这时不再按遮挡剔除。
 func _face_mask(idx: int) -> int:
+	if AppSettings.pitch() >= OPEN_VIEW_PITCH:
+		return 63
 	var c := logic.coord_of(idx)
 	var mask := 0
 	var dirs := [
