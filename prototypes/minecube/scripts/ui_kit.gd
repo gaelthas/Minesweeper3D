@@ -67,7 +67,7 @@ static func label(text: String, size: int, color: Color) -> Label:
 	return l
 
 
-static func button(text: String, font_size: int = 14) -> Button:
+static func button(text: String, font_size: int = 14, h_padding: int = 14) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.add_theme_font_override("font", font())
@@ -82,8 +82,8 @@ static func button(text: String, font_size: int = 14) -> Button:
 	normal.border_color = LINE
 	normal.set_border_width_all(1)
 	normal.set_corner_radius_all(8)
-	normal.content_margin_left = 14
-	normal.content_margin_right = 14
+	normal.content_margin_left = h_padding
+	normal.content_margin_right = h_padding
 	normal.content_margin_top = 6
 	normal.content_margin_bottom = 6
 
@@ -106,8 +106,8 @@ static func button(text: String, font_size: int = 14) -> Button:
 
 
 ## 分段选择用：选中态用蓝底蓝边，普通按钮没有这个状态
-static func toggle(text: String, font_size: int = 15) -> Button:
-	var b := button(text, font_size)
+static func toggle(text: String, font_size: int = 15, h_padding: int = 8) -> Button:
+	var b := button(text, font_size, h_padding)
 	b.toggle_mode = true
 	var on := (b.get_theme_stylebox("normal") as StyleBoxFlat).duplicate() as StyleBoxFlat
 	on.bg_color = Color(0.851, 0.894, 0.984)

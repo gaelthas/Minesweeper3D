@@ -50,6 +50,10 @@ func unflag() -> void:
 	_play(STREAM_FLAG, -9.0, randf_range(0.78, 0.86))
 
 
+func question() -> void:
+	_play(STREAM_FLOOD, -12.0, 0.74)
+
+
 func chord() -> void:
 	_play(STREAM_FLOOD, -6.0, 1.28)
 

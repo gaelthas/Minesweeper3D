@@ -7,6 +7,7 @@ extends RefCounted
 const HIDDEN := 0
 const REVEALED := 1
 const FLAGGED := 2
+const QUESTION := 3
 
 var size: Vector3i
 var mine_total: int
@@ -136,7 +137,9 @@ func reveal(i: int) -> Dictionary:
 	var opened: Array[int] = []
 	if game_over or not generated:
 		return {"opened": opened, "boom": false}
-	if i < 0 or i >= states.size() or states[i] != HIDDEN:
+	if i < 0 or i >= states.size() or states[i] == REVEALED:
+		return {"opened": opened, "boom": false}
+	if states[i] == FLAGGED:
 		return {"opened": opened, "boom": false}
 
 	if mines[i] == 1:
@@ -149,7 +152,7 @@ func reveal(i: int) -> Dictionary:
 	var stack: Array[int] = [i]
 	while not stack.is_empty():
 		var cur: int = stack.pop_back()
-		if states[cur] != HIDDEN or mines[cur] == 1:
+		if states[cur] == REVEALED or states[cur] == FLAGGED or mines[cur] == 1:
 			continue
 		states[cur] = REVEALED
 		revealed_count += 1
@@ -157,7 +160,7 @@ func reveal(i: int) -> Dictionary:
 		if counts[cur] != 0:
 			continue
 		for n in neighbors(cur):
-			if states[n] == HIDDEN and mines[n] == 0:
+			if mines[n] == 0 and (states[n] == HIDDEN or states[n] == QUESTION):
 				stack.append(n)
 
 	won = revealed_count == cell_count() - mine_total
@@ -166,17 +169,23 @@ func reveal(i: int) -> Dictionary:
 	return {"opened": opened, "boom": false}
 
 
-func toggle_flag(i: int) -> void:
-	if game_over or not generated:
+## 右键循环：未标记 → 旗 → 问号 → 未标记。
+## 只有旗计入 flag_count；问号不挡揭示，只是备忘。
+## 布雷前也可以标记——雷是在首击后才放下去的，标记跟着格子走。
+func cycle_mark(i: int) -> void:
+	if game_over:
 		return
 	if i < 0 or i >= states.size() or states[i] == REVEALED:
 		return
-	if states[i] == HIDDEN:
-		states[i] = FLAGGED
-		flag_count += 1
-	else:
-		states[i] = HIDDEN
-		flag_count -= 1
+	match states[i]:
+		HIDDEN:
+			states[i] = FLAGGED
+			flag_count += 1
+		FLAGGED:
+			states[i] = QUESTION
+			flag_count -= 1
+		_:
+			states[i] = HIDDEN
 
 
 ## 和弦：在已揭示的数字格上，若周围旗数恰好等于该数字，
@@ -199,7 +208,7 @@ func chord(i: int) -> Dictionary:
 
 	var boom := false
 	for n in neighbors(i):
-		if states[n] != HIDDEN:
+		if states[n] != HIDDEN and states[n] != QUESTION:
 			continue
 		var res := reveal(n)
 		opened.append_array(res["opened"])

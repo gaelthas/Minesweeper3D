@@ -13,6 +13,7 @@ var cells: Array[CellView] = []
 var camera_rig: CameraRig
 var hud: Hud
 var settings: SettingsPanel
+var result_panel: ResultPanel
 var sfx: Sfx
 
 var rng := RandomNumberGenerator.new()
@@ -61,11 +62,17 @@ func _ready() -> void:
 	settings.applied.connect(_on_settings_applied)
 	overlay.add_child(settings)
 
+	result_panel = ResultPanel.new()
+	result_panel.name = "Result"
+	result_panel.setup()
+	result_panel.restart_pressed.connect(_on_restart)
+	overlay.add_child(result_panel)
+
 	new_game()
 
 
 func _process(delta: float) -> void:
-	if settings != null and settings.visible:
+	if _ui_blocking():
 		return
 	_update_label_facing()
 	if _paused_for_settings:
@@ -77,12 +84,16 @@ func _process(delta: float) -> void:
 		hud.set_time(_elapsed)
 
 
+func _ui_blocking() -> bool:
+	return (settings != null and settings.visible) or (result_panel != null and result_panel.visible)
+
+
 func _update_label_facing() -> void:
 	if camera_rig == null or camera_rig.camera == null or cells.is_empty():
 		return
 	var cam_pos := camera_rig.camera.global_position
 	for c in cells:
-		c.update_label_facing(cam_pos)
+		c.update_symbol_facing(cam_pos)
 
 
 func _build_environment() -> void:
@@ -148,6 +159,8 @@ func new_game() -> void:
 	_elapsed = 0.0
 	_timing = false
 	_paused_for_settings = false
+	if result_panel != null:
+		result_panel.close()
 
 	hud.set_time(0.0)
 	_update_level_text()
@@ -161,6 +174,23 @@ func _update_level_text() -> void:
 		suffix = " · " + hud.t("静音", "muted")
 	hud.set_level("%d × %d × %d · %d %s%s" % [
 		board_side, board_side, board_side, mine_count, hud.t("雷", "mines"), suffix])
+
+
+func _finish_lose() -> void:
+	_timing = false
+	_show_all_mines()
+	hud.set_time(_elapsed)
+	sfx.boom()
+	hud.set_status(hud.t("踩到雷了 · 按 R 重开", "BOOM · press R to restart"))
+	result_panel.open(_elapsed, board_side, mine_count, false)
+
+
+func _finish_win() -> void:
+	_timing = false
+	hud.set_time(_elapsed)
+	sfx.win()
+	hud.set_status(hud.t("清空了 · 按 R 再来一局", "CLEARED · press R for another"))
+	result_panel.open(_elapsed, board_side, mine_count, true)
 
 
 func _on_restart() -> void:
@@ -188,7 +218,7 @@ func _quit() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if settings != null and settings.visible:
+	if _ui_blocking():
 		return
 
 	if event is InputEventMouseButton:
@@ -251,9 +281,11 @@ func _input(event: InputEvent) -> void:
 	if k.keycode == KEY_ESCAPE:
 		if settings != null and settings.visible:
 			settings.close()
+		elif result_panel != null and result_panel.visible:
+			result_panel.close()
 		return
 
-	if settings != null and settings.visible:
+	if _ui_blocking():
 		return
 
 	if k.keycode == KEY_R:
@@ -299,37 +331,35 @@ func _on_reveal(screen_pos: Vector2) -> void:
 	_refresh_stats()
 
 	if result["boom"]:
-		_timing = false
-		_show_all_mines()
-		sfx.boom()
-		hud.set_status(hud.t("踩到雷了 · 按 R 重开", "BOOM · press R to restart"))
+		_finish_lose()
 	else:
 		if opened.size() >= 3:
 			sfx.flood(opened.size())
 		elif not opened.is_empty():
 			sfx.reveal()
 		if logic.won:
-			_timing = false
-			sfx.win()
-			hud.set_status(hud.t("清空了 · 按 R 再来一局", "CLEARED · press R for another"))
+			_finish_win()
 
 
 func _on_flag(screen_pos: Vector2) -> void:
-	if logic.game_over or not logic.generated:
+	if logic.game_over:
 		return
 	var idx := _pick(screen_pos, CellView.LAYER_SOLID | CellView.LAYER_OPEN)
 	if idx < 0:
 		return
-	if logic.states[idx] == BoardLogic.REVEALED:
+	var prev := logic.states[idx]
+	if prev == BoardLogic.REVEALED:
 		return
-	var was_hidden := logic.states[idx] == BoardLogic.HIDDEN
-	logic.toggle_flag(idx)
+	logic.cycle_mark(idx)
 	_refresh(idx)
 	_refresh_stats()
-	if was_hidden:
-		sfx.flag()
-	else:
-		sfx.unflag()
+	match prev:
+		BoardLogic.HIDDEN:
+			sfx.flag()
+		BoardLogic.FLAGGED:
+			sfx.question()
+		_:
+			sfx.unflag()
 
 
 ## 和弦：在已揭示的数字格上，旗数与数字相等时一次揭开周围所有未插旗的格。
@@ -349,16 +379,11 @@ func _on_chord(screen_pos: Vector2) -> void:
 	_refresh_stats()
 
 	if result["boom"]:
-		_timing = false
-		_show_all_mines()
-		sfx.boom()
-		hud.set_status(hud.t("踩到雷了 · 按 R 重开", "BOOM · press R to restart"))
+		_finish_lose()
 	else:
 		sfx.chord()
 		if logic.won:
-			_timing = false
-			sfx.win()
-			hud.set_status(hud.t("清空了 · 按 R 再来一局", "CLEARED · press R for another"))
+			_finish_win()
 
 
 func _refresh(i: int) -> void:
@@ -415,6 +440,6 @@ func _show_all_mines() -> void:
 			if logic.states[i] == BoardLogic.FLAGGED:
 				continue
 			cells[i].set_mine(i == logic.hit_index)
-		elif logic.states[i] == BoardLogic.FLAGGED:
-			# 插错的旗：直接翻出底下的数字，让玩家看见自己错在哪
+		elif logic.states[i] == BoardLogic.FLAGGED or logic.states[i] == BoardLogic.QUESTION:
+			# 插错或标了问号的格子：直接翻出底下的数字，让玩家看见自己错在哪
 			cells[i].apply(BoardLogic.REVEALED, logic.counts[i], _face_mask(i))

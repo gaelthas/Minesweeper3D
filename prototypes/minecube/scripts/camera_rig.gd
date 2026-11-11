@@ -37,9 +37,9 @@ func zoom(amount: float) -> void:
 ## 依据盘面尺寸选一个能装下整盘的初始距离
 func frame(board_size: Vector3i) -> void:
 	var extent := float(maxi(board_size.x, maxi(board_size.y, board_size.z)))
-	distance = clampf(extent * 2.55, 5.0, 18.0)
-	min_distance = maxf(3.0, extent * 1.1)
-	max_distance = extent * 4.5
+	distance = clampf(extent * 2.7, 6.0, 38.0)
+	min_distance = maxf(3.0, extent * 1.2)
+	max_distance = extent * 4.0
 	_apply()
 
 

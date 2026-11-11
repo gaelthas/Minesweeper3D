@@ -6,7 +6,7 @@ extends Control
 
 signal applied(side: int, mines: int)
 
-const SIDES := [3, 4, 5, 6]
+const SIDES := [3, 4, 5, 6, 7, 8, 9]
 const TARGET_DENSITY := 0.14
 
 var _side := 4
@@ -56,7 +56,7 @@ func _build() -> void:
 
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 16)
-	col.custom_minimum_size = Vector2(352, 0)
+	col.custom_minimum_size = Vector2(404, 0)
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_child(col)
 
@@ -98,10 +98,10 @@ func _build_size_row() -> HBoxContainer:
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	for s in SIDES:
-		var b := UiKit.toggle(str(s))
+		var b := UiKit.toggle(str(s), 15, 4)
 		b.button_group = group
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.custom_minimum_size = Vector2(0, 34)
+		b.custom_minimum_size = Vector2(0, 36)
 		b.pressed.connect(func() -> void: _on_size(s))
 		box.add_child(b)
 		_size_buttons.append(b)

@@ -189,15 +189,45 @@ func _test_flags() -> void:
 			target = i
 			break
 
-	b.toggle_flag(target)
-	_check(b.states[target] == BL.FLAGGED and b.flag_count == 1, "插旗应计入 flag_count")
+	b.cycle_mark(target)
+	_check(b.states[target] == BL.FLAGGED and b.flag_count == 1, "第一次右键应插旗并计入 flag_count")
 	_check(b.remaining_mines() == 2, "剩余雷数应为 总数 - 旗数")
 
 	var res := b.reveal(target)
 	_check((res["opened"] as Array).is_empty(), "已插旗的格子不应被揭示")
 
-	b.toggle_flag(target)
-	_check(b.states[target] == BL.HIDDEN and b.flag_count == 0, "再点应取消旗标")
+	b.cycle_mark(target)
+	_check(b.states[target] == BL.QUESTION, "第二次右键应变成问号")
+	_check(b.flag_count == 0, "问号不应计入 flag_count")
+
+	b.cycle_mark(target)
+	_check(b.states[target] == BL.HIDDEN and b.flag_count == 0, "第三次右键应回到未标记")
+
+	# 问号格不挡揭示，揭示后标记消失
+	var b2 := BL.new(Vector3i(3, 3, 3), 3)
+	b2.place_mines(0, rng)
+	var target2 := -1
+	for i in b2.cell_count():
+		if b2.mines[i] == 0:
+			target2 = i
+			break
+	b2.cycle_mark(target2)
+	b2.cycle_mark(target2)
+	_check(b2.states[target2] == BL.QUESTION, "先标成问号")
+	var res2 := b2.reveal(target2)
+	_check(not (res2["opened"] as Array).is_empty(), "问号格应可以被揭示")
+	_check(b2.states[target2] == BL.REVEALED, "揭示后问号应被清掉")
+
+	# 布雷之前就能插旗，布雷之后标记保留
+	var b3 := BL.new(Vector3i(3, 3, 3), 3)
+	b3.cycle_mark(0)
+	_check(b3.states[0] == BL.FLAGGED and b3.flag_count == 1, "布雷前应允许插旗")
+	b3.cycle_mark(1)
+	b3.cycle_mark(1)
+	_check(b3.states[1] == BL.QUESTION, "布雷前也应允许标问号")
+	b3.place_mines(13, rng)
+	_check(b3.states[0] == BL.FLAGGED, "布雷后先前的旗应保留")
+	_check(b3.states[1] == BL.QUESTION, "布雷后先前的问号应保留")
 
 
 func _test_chord() -> void:
@@ -223,7 +253,7 @@ func _test_chord() -> void:
 	_check(not b.game_over, "旗数不足时不应结束")
 
 	# 正确插旗后和弦应一次揭开其余 25 格
-	b.toggle_flag(corner)
+	b.cycle_mark(corner)
 	var ok := b.chord(center)
 	_check(not ok["boom"], "旗插对了和弦不应该引爆")
 	_check((ok["opened"] as Array).size() == 25, "和弦应揭开其余 25 格，实际 %d" % (ok["opened"] as Array).size())
@@ -236,7 +266,7 @@ func _test_chord() -> void:
 	b2.generated = true
 	var c2 := b2.index_of(Vector3i(1, 1, 1))
 	b2.reveal(c2)
-	b2.toggle_flag(b2.index_of(Vector3i(2, 2, 2)))
+	b2.cycle_mark(b2.index_of(Vector3i(2, 2, 2)))
 	var bad := b2.chord(c2)
 	_check(bad["boom"], "旗插错时和弦应引爆")
 	_check(b2.game_over and not b2.won, "引爆后应进入失败终态")
@@ -248,8 +278,8 @@ func _test_chord() -> void:
 	b3.generated = true
 	var c3 := b3.index_of(Vector3i(1, 1, 1))
 	b3.reveal(c3)
-	b3.toggle_flag(b3.index_of(Vector3i(0, 0, 0)))
-	b3.toggle_flag(decoy)
+	b3.cycle_mark(b3.index_of(Vector3i(0, 0, 0)))
+	b3.cycle_mark(decoy)
 	var over := b3.chord(c3)
 	_check((over["opened"] as Array).is_empty(), "旗数多于数字时不应和弦")
 

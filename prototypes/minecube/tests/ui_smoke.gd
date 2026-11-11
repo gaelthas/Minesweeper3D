@@ -16,6 +16,8 @@ func _initialize() -> void:
 func _process(_delta: float) -> bool:
 	_f += 1
 	match _f:
+		6:
+			_test_pre_click_flag()
 		10:
 			_scene.settings.open(5, 12)
 			_scene.settings._on_apply()
@@ -40,6 +42,20 @@ func _process(_delta: float) -> bool:
 			print("PASS" if _fails == 0 else "FAIL %d" % _fails)
 			return true
 	return false
+
+
+## 首击之前右键就应该生效：雷还没放下去，但标记是记在格子上的
+func _test_pre_click_flag() -> void:
+	var logic = _scene.logic
+	_check(not logic.generated, "开局时盘面尚未布雷")
+
+	var idx: int = logic.index_of(Vector3i(3, 3, 3))
+	var cam: Camera3D = _scene.camera_rig.camera
+	var screen := cam.unproject_position(_scene.cells[idx].global_position)
+	_scene._on_flag(screen)
+
+	_check(logic.states[idx] == 2, "首击之前右键应能插旗，实际状态 %d" % logic.states[idx])
+	_check(logic.flag_count == 1, "旗数应为 1，实际 %d" % logic.flag_count)
 
 
 func _check_audio() -> void:
@@ -94,7 +110,7 @@ func _prepare_chord_scene() -> void:
 
 	var corner: int = logic.index_of(Vector3i(2, 2, 2))
 	logic.reveal(corner)
-	logic.toggle_flag(center)
+	logic.cycle_mark(center)
 	for c in _scene.cells:
 		_scene._refresh(c.index)
 

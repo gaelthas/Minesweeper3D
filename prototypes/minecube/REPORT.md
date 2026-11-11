@@ -66,6 +66,8 @@ doc/shots/                         01_start / 02_revealed / 03_5x5x5
 prototypes/minecube/
   project.godot
   scenes/main.tscn
+  assets/build_cube.py             Blender 生成圆角方块
+  assets/cube_rounded.glb          导出的圆角方块
   assets/build_mine.py             Blender 生成水雷的脚本
   assets/mine.glb                  导出的立体雷
   assets/sfx/                      六个音效 + CREDITS.md
@@ -74,6 +76,7 @@ prototypes/minecube/
   scripts/camera_rig.gd            环绕相机
   scripts/hud.gd                  顶栏：状态 / 正计时 / 重开·设置·关闭
   scripts/settings_panel.gd       阶数与雷数浮层
+  scripts/result_panel.gd         清空后的完成弹窗
   scripts/ui_kit.gd               字体与控件样式（中文字体走系统 PingFang）
   scripts/game.gd                  装配与输入
   tests/logic_test.gd              28 项断言

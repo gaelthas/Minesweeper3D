@@ -26,9 +26,7 @@ func _process(_delta: float) -> bool:
 		25:
 			_save("02_revealed")
 		27:
-			_scene.board_side = 5
-			_scene.mine_count = 12
-			_scene.new_game()
+			_set_board(5, 12)
 		29:
 			_reveal_some(18)
 		32:
@@ -39,20 +37,42 @@ func _process(_delta: float) -> bool:
 			_save("04_settings")
 		39:
 			_scene.settings.close()
-			_scene.board_side = 4
-			_scene.mine_count = 6
-			_scene.new_game()
+			_set_board(4, 6)
 		41:
-			_seed_flags()
+			_seed_marks()
 		45:
-			_save("05_flags")
+			_save("05_marks")
 		47:
 			_boom()
 		51:
 			_save("06_mines")
 		53:
+			_scene._elapsed = 46.3
+			_scene._finish_lose()
+		56:
+			_save("09_lose")
+		58:
+			_scene.result_panel.close()
+			_set_board(4, 6)
+			_win()
+		61:
+			_save("07_result")
+		63:
+			_scene.result_panel.close()
+			_set_board(9, 38)
+		65:
+			_reveal_some(24)
+		68:
+			_save("08_9x9x9")
+		70:
 			return true
 	return false
+
+
+func _set_board(side: int, mines: int) -> void:
+	_scene.board_side = side
+	_scene.mine_count = mines
+	_scene.new_game()
 
 
 func _reveal_some(limit: int) -> void:
@@ -71,23 +91,28 @@ func _reveal_some(limit: int) -> void:
 	_scene._refresh_stats()
 
 
-func _seed_flags() -> void:
+## 标记三种状态各摆几个：旗、旗、问号、问号
+func _seed_marks() -> void:
 	var logic = _scene.logic
 	logic.place_mines(0, _rng)
 	var done := 0
 	for i in logic.cell_count():
-		if done >= 8:
+		if done >= 6:
 			break
 		if logic.mines[i] == 0:
 			logic.reveal(i)
 			done += 1
-	var flagged := 0
+
+	var marked := 0
 	for i in logic.cell_count():
-		if flagged >= 3:
+		if marked >= 4:
 			break
 		if logic.mines[i] == 1:
-			logic.toggle_flag(i)
-			flagged += 1
+			logic.cycle_mark(i)
+			if marked >= 2:
+				logic.cycle_mark(i)
+			marked += 1
+
 	for c in _scene.cells:
 		_scene._refresh(c.index)
 	_scene._refresh_stats()
@@ -95,11 +120,9 @@ func _seed_flags() -> void:
 
 func _boom() -> void:
 	var logic = _scene.logic
-	if not logic.generated:
-		logic.place_mines(0, _rng)
 	var target := -1
 	for i in logic.cell_count():
-		if logic.mines[i] == 1 and logic.states[i] != 2:
+		if logic.mines[i] == 1 and logic.states[i] == 0:
 			target = i
 			break
 	if target < 0:
@@ -108,6 +131,21 @@ func _boom() -> void:
 	_scene._refresh_area(res["opened"])
 	_scene._show_all_mines()
 	_scene._refresh_stats()
+
+
+func _win() -> void:
+	var logic = _scene.logic
+	logic.place_mines(0, _rng)
+	var opened: Array = []
+	for i in logic.cell_count():
+		if logic.mines[i] == 0:
+			var res: Dictionary = logic.reveal(i)
+			opened.append_array(res["opened"])
+	_scene._elapsed = 83.7
+	_scene._refresh_area(opened)
+	_scene._refresh_stats()
+	if logic.won:
+		_scene._finish_win()
 
 
 func _save(name: String) -> void:
