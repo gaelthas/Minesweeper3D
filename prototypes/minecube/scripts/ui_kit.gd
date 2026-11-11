@@ -148,3 +148,38 @@ static func panel_style() -> StyleBoxFlat:
 	sb.shadow_size = 18
 	sb.shadow_offset = Vector2(0, 6)
 	return sb
+
+
+## 滑块的圆点。默认主题的抓手是深色方形，落在浅色面板上很扎眼，自己画一个。
+static func slider_grabber(size: int = 20) -> ImageTexture:
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var c := (size - 1) * 0.5
+	var r := c - 1.5
+	for y in size:
+		for x in size:
+			var d := Vector2(x - c, y - c).length()
+			if d <= r:
+				var edge := d > r - 1.6
+				img.set_pixel(x, y, LINE if edge else INK)
+	return ImageTexture.create_from_image(img)
+
+
+## 滑块的空轨
+static func slider_track() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.855, 0.882, 0.925)
+	sb.set_corner_radius_all(3)
+	sb.content_margin_top = 3
+	sb.content_margin_bottom = 3
+	return sb
+
+
+## 滑块已选中的那一段
+static func slider_fill() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = INK
+	sb.set_corner_radius_all(3)
+	sb.content_margin_top = 3
+	sb.content_margin_bottom = 3
+	return sb

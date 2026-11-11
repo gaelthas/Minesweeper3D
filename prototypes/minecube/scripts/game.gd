@@ -2,17 +2,19 @@ extends Node3D
 
 ## 入口：装配环境、相机、HUD、设置浮层，并串联逻辑层与视图层。
 
-const SPACING := 1.0
 const DRAG_THRESHOLD := 4.0
+## 和弦手势的位移容差：按下第二个键时若还在这个范围内，撤销之前的拖拽判定
+const CHORD_SLOP := 14.0
 
-var board_side := 4
-var mine_count := 6
+var board_side := 5
+var mine_count := 38
 
 var logic: BoardLogic
 var cells: Array[CellView] = []
 var camera_rig: CameraRig
 var hud: Hud
 var settings: SettingsPanel
+var settings_page: SettingsPage
 var result_panel: ResultPanel
 var sfx: Sfx
 
@@ -40,6 +42,9 @@ func _ready() -> void:
 	camera_rig.name = "CameraRig"
 	add_child(camera_rig)
 
+	AppSettings.load_from_disk()
+	AppSettings.apply()
+
 	sfx = Sfx.new()
 	sfx.name = "Sfx"
 	add_child(sfx)
@@ -49,6 +54,11 @@ func _ready() -> void:
 	add_child(hud)
 	hud.restart_pressed.connect(_on_restart)
 	hud.settings_pressed.connect(_open_settings)
+	hud.options_pressed.connect(_open_options)
+	hud.spacing_changed.connect(_on_spacing_changed)
+	hud.set_spacing(AppSettings.spacing)
+	hud.spacing_changed.connect(_on_spacing_changed)
+	hud.set_spacing(AppSettings.spacing)
 	hud.quit_pressed.connect(_quit)
 
 	var overlay := CanvasLayer.new()
@@ -62,6 +72,11 @@ func _ready() -> void:
 	settings.applied.connect(_on_settings_applied)
 	overlay.add_child(settings)
 
+	settings_page = SettingsPage.new()
+	settings_page.name = "SettingsPage"
+	settings_page.setup()
+	overlay.add_child(settings_page)
+
 	result_panel = ResultPanel.new()
 	result_panel.name = "Result"
 	result_panel.setup()
@@ -72,6 +87,8 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if hud != null:
+		hud.set_fps(Engine.get_frames_per_second() if AppSettings.show_fps else -1)
 	if _ui_blocking():
 		return
 	_update_label_facing()
@@ -85,7 +102,9 @@ func _process(delta: float) -> void:
 
 
 func _ui_blocking() -> bool:
-	return (settings != null and settings.visible) or (result_panel != null and result_panel.visible)
+	return (settings != null and settings.visible) \
+		or (settings_page != null and settings_page.visible) \
+		or (result_panel != null and result_panel.visible)
 
 
 func _update_label_facing() -> void:
@@ -137,9 +156,9 @@ func new_game() -> void:
 	logic = BoardLogic.new(board_size, mine_count)
 
 	var origin := Vector3(
-		-(board_size.x - 1) * 0.5 * SPACING,
-		-(board_size.y - 1) * 0.5 * SPACING,
-		-(board_size.z - 1) * 0.5 * SPACING
+		-(board_size.x - 1) * 0.5 * AppSettings.pitch(),
+		-(board_size.y - 1) * 0.5 * AppSettings.pitch(),
+		-(board_size.z - 1) * 0.5 * AppSettings.pitch()
 	)
 
 	for z in board_size.z:
@@ -148,7 +167,7 @@ func new_game() -> void:
 				var idx := logic.index_of(Vector3i(x, y, z))
 				var cell := CellView.new(idx)
 				cell.name = "Cell_%d" % idx
-				cell.position = origin + Vector3(x, y, z) * SPACING
+				cell.position = origin + Vector3(x, y, z) * AppSettings.pitch()
 				_board_root.add_child(cell)
 				cells.append(cell)
 
@@ -170,7 +189,7 @@ func new_game() -> void:
 
 func _update_level_text() -> void:
 	var suffix := ""
-	if sfx != null and sfx.muted:
+	if AppSettings.muted:
 		suffix = " · " + hud.t("静音", "muted")
 	hud.set_level("%d × %d × %d · %d %s%s" % [
 		board_side, board_side, board_side, mine_count, hud.t("雷", "mines"), suffix])
@@ -198,6 +217,11 @@ func _on_restart() -> void:
 	new_game()
 
 
+func _open_options() -> void:
+	sfx.ui()
+	settings_page.open()
+
+
 func _open_settings() -> void:
 	sfx.ui()
 	if _timing:
@@ -215,6 +239,19 @@ func _on_settings_applied(side: int, mines: int) -> void:
 
 func _quit() -> void:
 	get_tree().quit()
+
+
+func _is_click_action(button: int) -> bool:
+	var a: int = AppSettings.action_for(button)
+	return a == AppSettings.MouseAction.REVEAL or a == AppSettings.MouseAction.FLAG \
+		or a == AppSettings.MouseAction.CHORD
+
+
+func _panning_held() -> bool:
+	for b in _down.keys():
+		if AppSettings.action_for(b) == AppSettings.MouseAction.PAN:
+			return true
+	return false
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -241,21 +278,26 @@ func _unhandled_input(event: InputEvent) -> void:
 				_chord_armed = false
 				_action_done = false
 			_down[btn] = true
-			# 左右同按或中键 = 和弦
-			if (_down.has(MOUSE_BUTTON_LEFT) and _down.has(MOUSE_BUTTON_RIGHT)) \
-					or btn == MOUSE_BUTTON_MIDDLE:
+			# 左右两个"点击类"键同时按下 = 和弦。平移键不参与。
+			if _down.has(MOUSE_BUTTON_LEFT) and _down.has(MOUSE_BUTTON_RIGHT) \
+					and _is_click_action(MOUSE_BUTTON_LEFT) and _is_click_action(MOUSE_BUTTON_RIGHT):
 				_chord_armed = true
+				# 按下第二个键时手可能已经抖了几像素，之前若已判成拖拽，撤回
+				if (mb.position - _press_pos).length() <= CHORD_SLOP:
+					_dragging = false
 		else:
 			_down.erase(btn)
-			if not _action_done and not _dragging:
-				var pos := get_viewport().get_mouse_position()
-				if _chord_armed:
+			var action: int = AppSettings.action_for(btn)
+			if not _action_done and not _dragging and action != AppSettings.MouseAction.PAN \
+					and action != AppSettings.MouseAction.NONE:
+				var pos := mb.position
+				if _chord_armed or action == AppSettings.MouseAction.CHORD:
 					_on_chord(pos)
 					_action_done = true
-				elif btn == MOUSE_BUTTON_LEFT:
+				elif action == AppSettings.MouseAction.REVEAL:
 					_on_reveal(pos)
 					_action_done = true
-				elif btn == MOUSE_BUTTON_RIGHT:
+				elif action == AppSettings.MouseAction.FLAG:
 					_on_flag(pos)
 					_action_done = true
 			if _down.is_empty():
@@ -265,10 +307,18 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	elif event is InputEventMouseMotion and not _down.is_empty():
 		var mm := event as InputEventMouseMotion
+		# 和弦手势不转相机：左右键都按下时手必然会动，
+		# 一旦按普通阈值（4px）判成拖拽，和弦就永远触发不了。
+		if _chord_armed:
+			return
 		if not _dragging and (mm.position - _press_pos).length() > DRAG_THRESHOLD:
 			_dragging = true
 		if _dragging:
-			camera_rig.orbit(mm.relative)
+			# 按住平移键时拖拽是平移，其余情况是转视角
+			if _panning_held():
+				camera_rig.pan(mm.relative)
+			else:
+				camera_rig.orbit(mm.relative)
 
 
 func _input(event: InputEvent) -> void:
@@ -283,6 +333,8 @@ func _input(event: InputEvent) -> void:
 			settings.close()
 		elif result_panel != null and result_panel.visible:
 			result_panel.close()
+		elif settings_page != null and settings_page.visible:
+			settings_page.close()
 		return
 
 	if _ui_blocking():
@@ -291,33 +343,63 @@ func _input(event: InputEvent) -> void:
 	if k.keycode == KEY_R:
 		_on_restart()
 	elif k.keycode == KEY_M:
-		sfx.toggle_mute()
+		AppSettings.muted = not AppSettings.muted
+		AppSettings.apply()
+		AppSettings.save()
 		_update_level_text()
+		if settings_page != null and settings_page.visible:
+			settings_page._sync()
 
 
-func _pick(screen_pos: Vector2, mask: int = CellView.LAYER_SOLID) -> int:
+## 返回 { index, normal }：normal 用来判断点中的是哪一面
+func _raycast(screen_pos: Vector2, mask: int) -> Dictionary:
 	if camera_rig == null or camera_rig.camera == null:
-		return -1
+		return {}
 	var cam := camera_rig.camera
 	var from := cam.project_ray_origin(screen_pos)
 	var to := from + cam.project_ray_normal(screen_pos) * 200.0
 	var query := PhysicsRayQueryParameters3D.create(from, to, mask)
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	if hit.is_empty():
-		return -1
+		return {}
 	var collider = hit.get("collider")
 	if collider != null and collider.has_meta("cell_index"):
-		return int(collider.get_meta("cell_index"))
-	return -1
+		var idx := int(collider.get_meta("cell_index"))
+		# 重开是 queue_free，上一局的方块会在同一帧里还活着。
+		# 只认当前这一局真正挂在 cells 里的碰撞体，否则点击会被幽灵格子吞掉。
+		if idx >= 0 and idx < cells.size() and cells[idx].body == collider:
+			return {"index": idx, "normal": hit.get("normal", Vector3.UP)}
+	return {}
+
+
+func _pick(screen_pos: Vector2, mask: int = CellView.LAYER_SOLID) -> int:
+	return int(_raycast(screen_pos, mask).get("index", -1))
+
+
+## 碰撞盒是轴对齐的，法线落在某条轴上，直接映射到 CellView._faces 的序号
+## 顺序是 +Z -Z +X -X +Y -Y
+static func _face_from_normal(n: Vector3) -> int:
+	var ax := absf(n.x)
+	var ay := absf(n.y)
+	var az := absf(n.z)
+	if az >= ax and az >= ay:
+		return 0 if n.z > 0.0 else 1
+	if ax >= ay:
+		return 2 if n.x > 0.0 else 3
+	return 4 if n.y > 0.0 else 5
 
 
 func _on_reveal(screen_pos: Vector2) -> void:
 	if logic.game_over:
 		return
-	var idx := _pick(screen_pos)
+	# 已揭示的数字方块也进拾取范围：点到它就吃掉这一下，不能穿过去翻开后面的格子。
+	# 要挖内层得从方块之间的缝里瞄——那本来就是三维可玩性的一部分。
+	var idx := _pick(screen_pos, CellView.LAYER_SOLID | CellView.LAYER_OPEN)
 	if idx < 0:
 		return
 	if logic.states[idx] == BoardLogic.FLAGGED:
+		return
+	if logic.states[idx] == BoardLogic.REVEALED:
 		return
 
 	if not logic.generated:
@@ -366,11 +448,14 @@ func _on_flag(screen_pos: Vector2) -> void:
 func _on_chord(screen_pos: Vector2) -> void:
 	if logic.game_over:
 		return
-	var idx := _pick(screen_pos, CellView.LAYER_SOLID | CellView.LAYER_OPEN)
-	if idx < 0:
+	var hit := _raycast(screen_pos, CellView.LAYER_SOLID | CellView.LAYER_OPEN)
+	if hit.is_empty():
 		return
+	var idx := int(hit["index"])
+	# 按平面和弦：点哪一面就只在这一面的平面里判定
+	var face := _face_from_normal(hit["normal"] as Vector3)
 
-	var result := logic.chord(idx)
+	var result := logic.chord_face(idx, face)
 	var opened: Array = result["opened"]
 	if opened.is_empty() and not result["boom"]:
 		return
@@ -386,10 +471,40 @@ func _on_chord(screen_pos: Vector2) -> void:
 			_finish_win()
 
 
+func _on_spacing_changed(value: float) -> void:
+	AppSettings.spacing = clampi(int(value), 100, 200)
+	AppSettings.save()
+	hud.set_spacing(AppSettings.spacing)
+	_relayout_cells()
+
+
+## 按当前间距重新摆放所有方块——只动位置，方块尺寸不变
+func _relayout_cells() -> void:
+	if logic == null:
+		return
+	var pitch := AppSettings.pitch()
+	var size := Vector3i(board_side, board_side, board_side)
+	var origin := Vector3(
+		-(size.x - 1) * 0.5 * pitch,
+		-(size.y - 1) * 0.5 * pitch,
+		-(size.z - 1) * 0.5 * pitch)
+	for c in cells:
+		var p := logic.coord_of(c.index)
+		c.position = origin + Vector3(p) * pitch
+
+
+## 间距或缝隙改了之后，所有方块都要按新尺寸重画一遍
+func _refresh_all_cells() -> void:
+	if logic == null:
+		return
+	for c in cells:
+		_refresh(c.index)
+
+
 func _refresh(i: int) -> void:
 	if i < 0 or i >= cells.size():
 		return
-	cells[i].apply(logic.states[i], logic.counts[i], _face_mask(i))
+	cells[i].apply(logic.states[i], logic.counts[i], _face_mask(i), logic.face_counts_of(i))
 
 
 ## 一个格子被揭示后，邻格的可见面也会变化，需要一起刷新。
@@ -442,4 +557,4 @@ func _show_all_mines() -> void:
 			cells[i].set_mine(i == logic.hit_index)
 		elif logic.states[i] == BoardLogic.FLAGGED or logic.states[i] == BoardLogic.QUESTION:
 			# 插错或标了问号的格子：直接翻出底下的数字，让玩家看见自己错在哪
-			cells[i].apply(BoardLogic.REVEALED, logic.counts[i], _face_mask(i))
+			cells[i].apply(BoardLogic.REVEALED, logic.counts[i], _face_mask(i), logic.face_counts_of(i))

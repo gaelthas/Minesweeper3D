@@ -17,7 +17,9 @@ func _initialize() -> void:
 	_test_boom()
 	_test_flags()
 	_test_chord()
+	_test_face_expansion()
 	_test_center_degeneracy_3cubed()
+	_test_face_counts()
 
 	print("")
 	if _fails == 0:
@@ -231,57 +233,95 @@ func _test_flags() -> void:
 
 
 func _test_chord() -> void:
-	# 3^3，一颗雷在角上。体心的数字恰好是 1，邻域覆盖全盘。
-	var b := BL.new(Vector3i(3, 3, 3), 1)
-	var corner := b.index_of(Vector3i(0, 0, 0))
-	var center := b.index_of(Vector3i(1, 1, 1))
-	var decoy := b.index_of(Vector3i(2, 2, 2))
-	b.mines[corner] = 1
+	# 3^3，三颗雷分居体心所在的三条轴上：三个平面各有一颗以上，
+	# 体心六个面都非 0，揭示时不会连锁展开，和弦的判定才可观测。
+	var b := BL.new(Vector3i(3, 3, 3), 3)
+	var mines := [Vector3i(0, 1, 1), Vector3i(1, 0, 1), Vector3i(1, 1, 0)]
+	for m in mines:
+		b.mines[b.index_of(m)] = 1
 	b.recompute_counts()
 	b.generated = true
 
-	# 对未揭示格和弦应当无效
-	var early := b.chord(center)
-	_check((early["opened"] as Array).is_empty(), "对未揭示格和弦应无效果")
+	var center := b.index_of(Vector3i(1, 1, 1))
+	var fc := b.face_counts_of(center)
+	_check(fc == [2, 2, 2, 2, 2, 2], "体心六面都应为 2，实际 %s" % str(fc))
 
-	b.reveal(center)
-	_check(b.counts[center] == 1, "体心数字应为 1")
+	var first := b.reveal(center)
+	_check((first["opened"] as Array).size() == 1, "六面非 0 时揭示不应连锁，实际开了 %d 格"
+		% (first["opened"] as Array).size())
 
-	# 未插旗：旗数 0 不等于 1，什么都不发生
-	var unsatisfied := b.chord(center)
+	# 未插旗：旗数 0 不等于 2，什么都不发生
+	var unsatisfied := b.chord_face(center, 0)
 	_check((unsatisfied["opened"] as Array).is_empty(), "旗数不足时和弦不应揭开任何格")
 	_check(not b.game_over, "旗数不足时不应结束")
 
-	# 正确插旗后和弦应一次揭开其余 25 格
-	b.cycle_mark(corner)
-	var ok := b.chord(center)
-	_check(not ok["boom"], "旗插对了和弦不应该引爆")
-	_check((ok["opened"] as Array).size() == 25, "和弦应揭开其余 25 格，实际 %d" % (ok["opened"] as Array).size())
-	_check(b.won, "和弦揭开最后一格后应判定胜利")
+	# 只把 +Z 平面里的两颗雷插上旗
+	var z_mines := [Vector3i(1, 0, 1), Vector3i(0, 1, 1)]
+	for m in z_mines:
+		b.cycle_mark(b.index_of(m))
 
-	# 旗插错：数字被满足，但雷没被标出来，和弦会踩雷
-	var b2 := BL.new(Vector3i(3, 3, 3), 1)
-	b2.mines[b2.index_of(Vector3i(0, 0, 0))] = 1
+	# 别的平面旗数仍是 0，不该被 +Z 的两面旗带动
+	var other := b.chord_face(center, 4)
+	_check((other["opened"] as Array).is_empty(), "旗插在 +Z 平面，+Y 平面不应触发和弦")
+
+	# +Z 面旗数对上数字，揭开该平面内其余 6 格
+	var ok := b.chord_face(center, 0)
+	_check(not ok["boom"], "旗插对了和弦不应该引爆")
+	# 打开的格数会带上连锁展开，所以只断言该平面内的 6 格都开了
+	_check((ok["opened"] as Array).size() >= 6, "和弦至少应揭开 +Z 平面内其余 6 格，实际 %d"
+		% (ok["opened"] as Array).size())
+	for m in [Vector3i(0, 0, 1), Vector3i(2, 0, 1), Vector3i(2, 1, 1),
+			Vector3i(0, 2, 1), Vector3i(1, 2, 1), Vector3i(2, 2, 1)]:
+		_check(b.states[b.index_of(m)] == BL.REVEALED, "+Z 平面内 %s 应被揭开" % str(m))
+
+	# 平面外的那颗雷不受影响
+	_check(b.states[b.index_of(Vector3i(1, 1, 0))] == BL.HIDDEN, "平面外的雷不应被揭开")
+
+	# 旗插错：把平面外的雷当旗插上，+Y 面数字被满足但会踩雷
+	var b2 := BL.new(Vector3i(3, 3, 3), 3)
+	for m in mines:
+		b2.mines[b2.index_of(m)] = 1
 	b2.recompute_counts()
 	b2.generated = true
 	var c2 := b2.index_of(Vector3i(1, 1, 1))
 	b2.reveal(c2)
-	b2.cycle_mark(b2.index_of(Vector3i(2, 2, 2)))
-	var bad := b2.chord(c2)
-	_check(bad["boom"], "旗插错时和弦应引爆")
-	_check(b2.game_over and not b2.won, "引爆后应进入失败终态")
+	# +Y 平面（y=1）里的两颗雷是 (1,1,0) 与 (0,1,1)，插上就满足 y 面的 2
+	b2.cycle_mark(b2.index_of(Vector3i(1, 1, 0)))
+	b2.cycle_mark(b2.index_of(Vector3i(0, 1, 1)))
+	var bad := b2.chord_face(c2, 4)
+	_check(not bad["boom"], "旗插对了 +Y 面不应引爆")
 
-	# 旗数多于数字：同样不触发
-	var b3 := BL.new(Vector3i(3, 3, 3), 1)
-	b3.mines[b3.index_of(Vector3i(0, 0, 0))] = 1
+	# 把旗全撤掉、改插一颗错的，则触发但踩雷
+	var b3 := BL.new(Vector3i(3, 3, 3), 3)
+	for m in mines:
+		b3.mines[b3.index_of(m)] = 1
 	b3.recompute_counts()
 	b3.generated = true
 	var c3 := b3.index_of(Vector3i(1, 1, 1))
 	b3.reveal(c3)
-	b3.cycle_mark(b3.index_of(Vector3i(0, 0, 0)))
-	b3.cycle_mark(decoy)
-	var over := b3.chord(c3)
-	_check((over["opened"] as Array).is_empty(), "旗数多于数字时不应和弦")
+	# 一颗插对（真雷）、一颗插错（空位），旗数凑够 2 就会揭开剩下的雷
+	b3.cycle_mark(b3.index_of(Vector3i(1, 0, 1)))
+	b3.cycle_mark(b3.index_of(Vector3i(2, 2, 1)))
+	var wrong := b3.chord_face(c3, 0)
+	_check(wrong["boom"], "旗数对上但位置错了，和弦应引爆")
+	_check(b3.game_over and not b3.won, "引爆后应进入失败终态")
+
+
+## 展开按面判定：某一面为 0 就整片打开该平面内的 8 格
+func _test_face_expansion() -> void:
+	var b := BL.new(Vector3i(3, 3, 3), 1)
+	b.mines[b.index_of(Vector3i(0, 1, 1))] = 1
+	b.recompute_counts()
+	b.generated = true
+
+	var center := b.index_of(Vector3i(1, 1, 1))
+	var fc := b.face_counts_of(center)
+	_check(fc[2] == 0 and fc[3] == 0, "雷在 x=0 层，体心的 ±X 两面应为 0，实际 %s" % str(fc))
+
+	b.reveal(center)
+	_check(b.states[b.index_of(Vector3i(1, 0, 1))] == BL.REVEALED,
+		"±X 面为 0，该平面内的格子应被自动打开")
+	_check(b.states[b.index_of(Vector3i(0, 1, 1))] == BL.HIDDEN, "雷本身不能被展开")
 
 
 func _test_center_degeneracy_3cubed() -> void:
@@ -301,3 +341,37 @@ func _test_center_degeneracy_3cubed() -> void:
 	var b4 := BL.new(Vector3i(4, 4, 4), 6)
 	_check(b4.neighbors(b4.index_of(Vector3i(1, 1, 1))).size() < b4.cell_count() - 1,
 		"4^3 单格邻域不应覆盖全盘")
+
+
+## 每面统计该面所在平面内的 8 邻格。
+## 推论：一颗雷会被 6 个面里的 4 个统计到（包含它的那两个平面各两面），
+## 所以六面之和 = 4 × 26 邻域计数；同一轴的两面数值必然相同。
+func _test_face_counts() -> void:
+	var b := BL.new(Vector3i(3, 3, 3), 1)
+	b.mines.fill(0)
+	b.mines[b.index_of(Vector3i(1, 1, 1))] = 1
+	b.recompute_counts()
+
+	# (0,0,1) 与雷同在 z=1 平面 → ±Z 两面都是 1，其余为 0
+	var diag := b.index_of(Vector3i(0, 0, 1))
+	var dc := b.face_counts_of(diag)
+	_check(dc == [1, 1, 0, 0, 0, 0], "z 平面内的雷只应出现在 ±Z 两面，实际 %s" % str(dc))
+
+	# (1,0,1) 的雷在 z=1 与 x=1 两个平面里 → 四个面为 1
+	var orth := b.index_of(Vector3i(1, 0, 1))
+	var oc := b.face_counts_of(orth)
+	_check(oc == [1, 1, 1, 1, 0, 0], "两个平面各两面应为 1，实际 %s" % str(oc))
+
+	# 不变量：六面之和 = 4 × 26 邻域计数
+	var sum := 0
+	for v in oc:
+		sum += v
+	_check(sum == 4 * b.counts[orth], "六面之和应为 26 计数的 4 倍，实际 %d vs %d" % [
+		sum, b.counts[orth]])
+
+	# 同一轴的两面必然相同
+	_check(oc[0] == oc[1] and oc[2] == oc[3] and oc[4] == oc[5], "同一轴的两面数值应相同")
+
+	# 面邻域是平面内的 3×3 去心，最多 8 格
+	_check(b.face_neighbors(b.index_of(Vector3i(1, 1, 1)), 0).size() == 8, "体心的面邻域应有 8 格")
+	_check(BL.FACE_AXIS == [2, 2, 0, 0, 1, 1], "面法线轴顺序应与 CellView._faces 一致")

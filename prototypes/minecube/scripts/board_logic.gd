@@ -17,6 +17,10 @@ var mines := PackedByteArray()
 var counts := PackedByteArray()
 var states := PackedByteArray()
 
+## 每格 6 个面的雷数，顺序 +Z -Z +X -X +Y -Y，与 CellView._faces 一致。
+## 每个数只统计该面所在平面内的 8 个邻格，不含法线方向的邻格。
+var face_counts := PackedByteArray()
+
 var revealed_count := 0
 var flag_count := 0
 var hit_index := -1
@@ -37,6 +41,8 @@ func _init(p_size: Vector3i, p_mines: int) -> void:
 	counts.fill(0)
 	states.resize(total)
 	states.fill(HIDDEN)
+	face_counts.resize(total * 6)
+	face_counts.fill(0)
 
 	for z in range(-1, 2):
 		for y in range(-1, 2):
@@ -122,6 +128,56 @@ func recompute_counts() -> void:
 			if mines[n] == 1:
 				c += 1
 		counts[i] = c
+	recompute_face_counts()
+
+
+## 面的法线轴：+Z -Z 是 z 轴、+X -X 是 x 轴、+Y -Y 是 y 轴
+const FACE_AXIS := [2, 2, 0, 0, 1, 1]
+
+
+## 某一面所在平面内的 8 个邻格：固定法线轴，另外两轴各偏移 ±1
+func face_neighbors(i: int, face: int) -> Array[int]:
+	var out: Array[int] = []
+	var axis: int = FACE_AXIS[face]
+	var c := coord_of(i)
+	for a in range(-1, 2):
+		for b in range(-1, 2):
+			if a == 0 and b == 0:
+				continue
+			var off := Vector3i.ZERO
+			match axis:
+				0:
+					off = Vector3i(0, a, b)
+				1:
+					off = Vector3i(a, 0, b)
+				_:
+					off = Vector3i(a, b, 0)
+			var q := c + off
+			if in_bounds(q):
+				out.append(index_of(q))
+	return out
+
+
+## 每面 8 邻域的雷数。注意法线方向的邻格不在任何一面里——
+## 正上方有雷的格子，六个面可能全是 0。
+func recompute_face_counts() -> void:
+	face_counts.resize(cell_count() * 6)
+	for i in cell_count():
+		for f in 6:
+			if mines[i] == 1:
+				face_counts[i * 6 + f] = 0
+				continue
+			var n := 0
+			for j in face_neighbors(i, f):
+				n += mines[j]
+			face_counts[i * 6 + f] = n
+
+
+func face_counts_of(i: int) -> Array[int]:
+	var out: Array[int] = []
+	for f in 6:
+		out.append(face_counts[i * 6 + f])
+	return out
 
 
 func _shuffle(arr: Array[int], rng: RandomNumberGenerator) -> void:
@@ -157,11 +213,15 @@ func reveal(i: int) -> Dictionary:
 		states[cur] = REVEALED
 		revealed_count += 1
 		opened.append(cur)
-		if counts[cur] != 0:
-			continue
-		for n in neighbors(cur):
-			if mines[n] == 0 and (states[n] == HIDDEN or states[n] == QUESTION):
-				stack.append(n)
+
+		# 展开按面判定：某一面为 0，说明该平面内的 8 格必无雷，可以整片打开。
+		# 六个面都为 0 时就等于把 26 邻域全开，和原来的整格判定一致。
+		for f in 6:
+			if face_counts[cur * 6 + f] != 0:
+				continue
+			for n in face_neighbors(cur, f):
+				if states[n] == HIDDEN or states[n] == QUESTION:
+					stack.append(n)
 
 	won = revealed_count == cell_count() - mine_total
 	if won:
@@ -188,28 +248,35 @@ func cycle_mark(i: int) -> void:
 			states[i] = HIDDEN
 
 
-## 和弦：在已揭示的数字格上，若周围旗数恰好等于该数字，
-## 一次揭开所有未插旗的相邻未揭示格。旗插错了照样会炸。
-func chord(i: int) -> Dictionary:
+## 和弦按平面判定：只在被点的那一面所属的平面里比旗数。
+## 这一面显示几，就要求这 8 个邻格里有几面旗；对上了才揭开该平面内其余未标记的格子。
+## 不同平面各算各的，互不影响——这正是每面独立计数后的自然玩法。
+func chord_face(i: int, face: int) -> Dictionary:
 	var opened: Array[int] = []
 	if game_over or not generated:
 		return {"opened": opened, "boom": false}
-	if i < 0 or i >= states.size():
+	if i < 0 or i >= states.size() or face < 0 or face > 5:
 		return {"opened": opened, "boom": false}
-	if states[i] != REVEALED or counts[i] == 0:
+	if states[i] != REVEALED:
+		return {"opened": opened, "boom": false}
+
+	var need: int = face_counts[i * 6 + face]
+	if need == 0:
 		return {"opened": opened, "boom": false}
 
 	var flagged := 0
-	for n in neighbors(i):
+	var targets: Array[int] = []
+	for n in face_neighbors(i, face):
 		if states[n] == FLAGGED:
 			flagged += 1
-	if flagged != counts[i]:
+		elif states[n] == HIDDEN or states[n] == QUESTION:
+			targets.append(n)
+
+	if flagged != need:
 		return {"opened": opened, "boom": false}
 
 	var boom := false
-	for n in neighbors(i):
-		if states[n] != HIDDEN and states[n] != QUESTION:
-			continue
+	for n in targets:
 		var res := reveal(n)
 		opened.append_array(res["opened"])
 		if res["boom"]:

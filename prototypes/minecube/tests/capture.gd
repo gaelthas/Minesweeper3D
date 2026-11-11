@@ -65,6 +65,11 @@ func _process(_delta: float) -> bool:
 		68:
 			_save("08_9x9x9")
 		70:
+			_scene._open_options()
+		73:
+			_save("10_options")
+		75:
+			_scene.settings_page.close()
 			return true
 	return false
 

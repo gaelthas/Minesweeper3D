@@ -13,8 +13,6 @@ const STREAM_UI: AudioStream = preload("res://assets/sfx/ui_click.mp3")
 
 const POOL_SIZE := 8
 
-var muted := false
-
 var _players: Array[AudioStreamPlayer] = []
 var _next := 0
 
@@ -25,11 +23,6 @@ func _ready() -> void:
 		p.name = "Voice%d" % i
 		add_child(p)
 		_players.append(p)
-
-
-func toggle_mute() -> bool:
-	muted = not muted
-	return muted
 
 
 func reveal() -> void:
@@ -71,7 +64,7 @@ func ui() -> void:
 
 
 func _play(stream: AudioStream, volume_db: float, pitch: float) -> void:
-	if muted or stream == null or _players.is_empty():
+	if stream == null or _players.is_empty():
 		return
 	var p := _players[_next]
 	_next = (_next + 1) % POOL_SIZE

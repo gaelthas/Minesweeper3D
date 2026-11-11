@@ -6,16 +6,19 @@ extends Control
 
 signal applied(side: int, mines: int)
 
-const SIDES := [3, 4, 5, 6, 7, 8, 9]
-const TARGET_DENSITY := 0.14
+const MIN_SIDE := 3
+## 上限由性能定：12 阶 1728 格、1.7 万节点、全开 54.8 FPS；
+## 14 阶 2744 格掉到 23.8 FPS，已经不能玩。
+const MAX_SIDE := 13
+const TARGET_DENSITY := 0.30
 
-var _side := 4
-var _mines := 6
+var _side := 5
+var _mines := 38
 
-var _size_buttons: Array[Button] = []
+var _size_slider: HSlider
+var _size_label: Label
 var _mine_label: Label
-var _minus: Button
-var _plus: Button
+var _slider: HSlider
 var _hint: Label
 
 
@@ -27,9 +30,8 @@ func setup() -> void:
 
 
 func open(side: int, mines: int) -> void:
-	_side = side if SIDES.has(side) else 4
+	_side = clampi(side, MIN_SIDE, MAX_SIDE)
 	_mines = clampi(mines, 1, _max_mines())
-	_sync_toggles()
 	_refresh()
 	visible = true
 
@@ -85,57 +87,57 @@ func _build() -> void:
 	start.pressed.connect(_on_apply)
 	actions.add_child(start)
 
-	_sync_toggles()
 	_refresh()
 
 
 func _build_size_row() -> HBoxContainer:
 	var row := _row_label(UiKit.t("阶数", "SIZE"))
-	var group := ButtonGroup.new()
-	var box := HBoxContainer.new()
-	box.add_theme_constant_override("separation", 6)
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-	for s in SIDES:
-		var b := UiKit.toggle(str(s), 15, 4)
-		b.button_group = group
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.custom_minimum_size = Vector2(0, 36)
-		b.pressed.connect(func() -> void: _on_size(s))
-		box.add_child(b)
-		_size_buttons.append(b)
+	_size_slider = _make_slider(MIN_SIDE, MAX_SIDE)
+	_size_slider.value_changed.connect(_on_size_changed)
+	row.add_child(_size_slider)
 
-	row.add_child(box)
+	_size_label = UiKit.label("5", 17, UiKit.INK)
+	_size_label.custom_minimum_size = Vector2(46, 0)
+	_size_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(_size_label)
+
 	return row
+
+
+## 两条滑块共用同一套自绘样式：默认主题的抓点是深色方块，落在浅色面板上很突兀
+func _make_slider(lo: int, hi: int) -> HSlider:
+	var sl := HSlider.new()
+	sl.min_value = lo
+	sl.max_value = hi
+	sl.step = 1
+	sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	sl.custom_minimum_size = Vector2(0, 26)
+	sl.focus_mode = Control.FOCUS_NONE
+
+	var grabber := UiKit.slider_grabber()
+	sl.add_theme_icon_override("grabber", grabber)
+	sl.add_theme_icon_override("grabber_highlight", grabber)
+	sl.add_theme_icon_override("grabber_disabled", grabber)
+	sl.add_theme_stylebox_override("slider", UiKit.slider_track())
+	sl.add_theme_stylebox_override("grabber_area", UiKit.slider_fill())
+	sl.add_theme_stylebox_override("grabber_area_highlight", UiKit.slider_fill())
+	return sl
 
 
 func _build_mine_row() -> HBoxContainer:
 	var row := _row_label(UiKit.t("雷数", "MINES"))
-	var box := HBoxContainer.new()
-	box.add_theme_constant_override("separation", 6)
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-	_minus = UiKit.button("−", 18)
-	_minus.custom_minimum_size = Vector2(44, 34)
-	_minus.pressed.connect(func() -> void: _bump(-1))
-	box.add_child(_minus)
+	_slider = _make_slider(1, 63)
+	_slider.value_changed.connect(_on_mines_changed)
+	row.add_child(_slider)
 
-	var field := PanelContainer.new()
-	field.add_theme_stylebox_override("panel", UiKit.field_style())
-	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_mine_label = UiKit.label("6", 17, UiKit.INK)
-	_mine_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	field.add_child(_mine_label)
-	box.add_child(field)
+	_mine_label = UiKit.label("38", 17, UiKit.INK)
+	_mine_label.custom_minimum_size = Vector2(46, 0)
+	_mine_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(_mine_label)
 
-	_plus = UiKit.button("+", 18)
-	_plus.custom_minimum_size = Vector2(44, 34)
-	_plus.pressed.connect(func() -> void: _bump(1))
-	box.add_child(_plus)
-
-	row.add_child(box)
 	return row
 
 
@@ -149,14 +151,14 @@ func _row_label(text: String) -> HBoxContainer:
 	return row
 
 
-func _on_size(side: int) -> void:
-	_side = side
+func _on_size_changed(value: float) -> void:
+	_side = clampi(int(value), MIN_SIDE, MAX_SIDE)
 	_mines = _recommended(_total())
 	_refresh()
 
 
-func _bump(delta: int) -> void:
-	_mines = clampi(_mines + delta, 1, _max_mines())
+func _on_mines_changed(value: float) -> void:
+	_mines = clampi(int(value), 1, _max_mines())
 	_refresh()
 
 
@@ -172,17 +174,21 @@ func _recommended(total: int) -> int:
 	return clampi(int(round(total * TARGET_DENSITY)), 1, maxi(1, total - 1))
 
 
-func _sync_toggles() -> void:
-	for i in _size_buttons.size():
-		_size_buttons[i].button_pressed = (SIDES[i] == _side)
-
-
 func _refresh() -> void:
 	if _mine_label == null:
 		return
+	_size_label.text = str(_side)
+	if not is_equal_approx(float(_side), _size_slider.value):
+		_size_slider.set_value_no_signal(float(_side))
+
+	_size_label.text = str(_side)
+	if not is_equal_approx(float(_side), _size_slider.value):
+		_size_slider.set_value_no_signal(float(_side))
+
 	_mine_label.text = str(_mines)
-	_minus.disabled = _mines <= 1
-	_plus.disabled = _mines >= _max_mines()
+	_slider.max_value = _max_mines()
+	if not is_equal_approx(float(_mines), _slider.value):
+		_slider.set_value_no_signal(float(_mines))
 	var total := _total()
 	_hint.text = UiKit.t("%d × %d × %d · 共 %d 格 · 密度 %.1f%% · 推荐 %d 颗",
 		"%d × %d × %d · %d cells · %.1f%% · suggest %d") % [

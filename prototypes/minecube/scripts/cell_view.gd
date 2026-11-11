@@ -3,16 +3,19 @@ extends Node3D
 
 ## 单个方块的视图。
 ##
-## 碰撞层分两类，这是三维可达性的支点：
-##   LAYER_SOLID —— 未揭示 / 已标记，左键揭示命中的目标
-##   LAYER_OPEN  —— 已揭示的数字格，只给和弦用
-## 数字格不在揭示射线的掩码里，射线会穿过去命中内层，
-## 否则 3×3×3 的体心被 26 个方块包住就永远点不到了。
+## 碰撞层分两类：
+##   LAYER_SOLID —— 未揭示 / 已标记，左键揭示的目标
+##   LAYER_OPEN  —— 已揭示的数字格，和弦的目标
+## 揭示与和弦的射线都覆盖这两层：点到数字方块就被吃掉，不会穿过去翻开后面的格子。
+## 要挖内层得从方块之间的缝里瞄——数字格缩到 0.70，缝隙 0.30，斜着看能穿过去。
 
-const BASE_SIZE := 0.88
-const SMALL_SIZE := 0.70
+## 已揭示/已标记方块的边长由选项页的「缝隙」滑块决定，见 AppSettings.revealed_size()
 const LABEL_GAP := 0.018
 const FLAG_QUAD := 0.34
+
+## 碰撞盒跟着缩放一起变。缩小的方块外面如果还留着一圈原尺寸的碰撞壳，
+## 本该穿过去的点击就会被吃掉——标记后内层方块看得见却点不到，就是这个原因。
+var _box: BoxShape3D
 
 const LAYER_SOLID := 1
 const LAYER_OPEN := 2
@@ -44,6 +47,7 @@ var _flags: Array[MeshInstance3D] = []
 var _mask := 0
 var _symbol := Symbol.NONE
 var _symbol_color := Color.WHITE
+var _face_colors: Array[Color] = []
 
 var _mine: Node3D
 var _mine_loaded := false
@@ -69,9 +73,9 @@ func _init(p_index: int) -> void:
 	add_child(body)
 
 	var shape := CollisionShape3D.new()
-	var bs := BoxShape3D.new()
-	bs.size = Vector3(BASE_SIZE, BASE_SIZE, BASE_SIZE)
-	shape.shape = bs
+	_box = BoxShape3D.new()
+	_box.size = Vector3.ONE * AppSettings.hidden_size()
+	shape.shape = _box
 	body.add_child(shape)
 
 	mat = StandardMaterial3D.new()
@@ -106,20 +110,20 @@ func _init(p_index: int) -> void:
 
 ## face_mask 的 6 个位依次对应 +Z -Z +X -X +Y -Y，
 ## 表示这一面朝盘面外、或朝向已揭示格（即真的能被看到）。
-func apply(state: int, count: int, face_mask: int = 63) -> void:
+func apply(state: int, count: int, face_mask: int = 63, face_counts: Array = []) -> void:
 	match state:
 		BoardLogic.FLAGGED:
 			_set_marked(COL_FLAG, Symbol.FLAG, face_mask)
 		BoardLogic.QUESTION:
 			_set_marked(COL_QUESTION, Symbol.QUESTION, face_mask)
 		BoardLogic.REVEALED:
-			_set_revealed(count, face_mask)
+			_set_revealed(count, face_mask, face_counts)
 		_:
 			_set_solid(COL_HIDDEN)
 
 
 func set_mine(is_hit: bool) -> void:
-	_set_size(BASE_SIZE)
+	_set_size(AppSettings.hidden_size())
 	mesh.visible = false
 	_hide_symbols()
 	_mask = 0
@@ -146,7 +150,7 @@ func set_mine(is_hit: bool) -> void:
 func update_symbol_facing(cam_pos: Vector3) -> void:
 	if _symbol == Symbol.NONE or _mask == 0:
 		return
-	var half := SMALL_SIZE * 0.5
+	var half := AppSettings.revealed_size() * 0.5
 	for k in _faces.size():
 		if (_mask & (1 << k)) == 0:
 			continue
@@ -159,16 +163,22 @@ func update_symbol_facing(cam_pos: Vector3) -> void:
 				_flags[k].transparency = 1.0 - alpha
 		else:
 			var l := labels[k]
+			if l.text == "":
+				l.visible = false
+				continue
 			l.visible = alpha > 0.01
-			l.modulate = Color(_symbol_color.r, _symbol_color.g, _symbol_color.b, alpha)
+			var c: Color = _face_colors[k] if _face_colors.size() == 6 else _symbol_color
+			l.modulate = Color(c.r, c.g, c.b, alpha)
 
 
 func _set_size(s: float) -> void:
 	mesh.scale = Vector3.ONE * s
+	if _box != null:
+		_box.size = Vector3(s, s, s)
 
 
 func _set_solid(color: Color) -> void:
-	_set_size(BASE_SIZE)
+	_set_size(AppSettings.hidden_size())
 	mesh.visible = true
 	mat.albedo_color = color
 	mat.roughness = 0.50
@@ -185,7 +195,7 @@ func _set_solid(color: Color) -> void:
 
 
 func _set_marked(color: Color, kind: Symbol, face_mask: int) -> void:
-	_set_size(SMALL_SIZE)
+	_set_size(AppSettings.revealed_size())
 	mesh.visible = true
 	mat.albedo_color = color
 	mat.roughness = 0.76
@@ -209,7 +219,7 @@ func _set_marked(color: Color, kind: Symbol, face_mask: int) -> void:
 				_flags[k].transparency = 0.0
 	else:
 		_symbol_color = Color(0.165, 0.200, 0.259)
-		var half := SMALL_SIZE * 0.5 + LABEL_GAP
+		var half := AppSettings.revealed_size() * 0.5 + LABEL_GAP
 		for k in _faces.size():
 			var l := labels[k]
 			l.position = _faces[k] * half
@@ -220,8 +230,8 @@ func _set_marked(color: Color, kind: Symbol, face_mask: int) -> void:
 			l.visible = on
 
 
-func _set_revealed(count: int, face_mask: int) -> void:
-	_set_size(SMALL_SIZE)
+func _set_revealed(count: int, face_mask: int, face_counts: Array = []) -> void:
+	_set_size(AppSettings.revealed_size())
 	mat.albedo_color = COL_OPEN
 	mat.roughness = 0.90
 	mat.rim_enabled = true
@@ -232,23 +242,39 @@ func _set_revealed(count: int, face_mask: int) -> void:
 	_apply_glow(false)
 
 	_mask = 63 if face_mask == 0 else face_mask
-	_symbol = Symbol.NUMBER if count > 0 else Symbol.NONE
 	_symbol_color = _number_color(count)
-	mesh.visible = count > 0
+
+	# 六个面全是 0 的格子没有任何信息可显示——体对角方向的雷不进任何一面。
+	# 这类格子和 0 格一样要消失，不能留一颗占位的空方块。
+	var has_symbol := count > 0
+	if face_counts.size() == 6:
+		has_symbol = false
+		for v in face_counts:
+			if v > 0:
+				has_symbol = true
+				break
+
+	_symbol = Symbol.NUMBER if has_symbol else Symbol.NONE
+	mesh.visible = has_symbol
 	_hide_symbols()
 
-	# 数字格只在和弦射线里可命中；0 格彻底让路
-	body.collision_layer = LAYER_OPEN if count > 0 else 0
+	# 数字格只在和弦射线里可命中；无符号的格子彻底让路
+	body.collision_layer = LAYER_OPEN if has_symbol else 0
 
-	if count > 0:
-		var half := SMALL_SIZE * 0.5 + LABEL_GAP
+	if _face_colors.size() != 6:
+		_face_colors.resize(6)
+
+	if has_symbol:
+		var half := AppSettings.revealed_size() * 0.5 + LABEL_GAP
 		for k in _faces.size():
+			var value: int = face_counts[k] if face_counts.size() == 6 else count
 			var l := labels[k]
 			l.position = _faces[k] * half
 			l.rotation = _face_rots[k]
 			var on := (_mask & (1 << k)) != 0
-			l.text = str(count) if on else ""
-			l.modulate = _symbol_color
+			l.text = str(value) if (on and value > 0) else ""
+			_face_colors[k] = _number_color(value)
+			l.modulate = _face_colors[k]
 			l.visible = on
 
 
@@ -263,7 +289,7 @@ func _hide_symbols() -> void:
 func _ensure_flag_quads() -> void:
 	if not _flags.is_empty():
 		return
-	var half := SMALL_SIZE * 0.5 + LABEL_GAP
+	var half := AppSettings.revealed_size() * 0.5 + LABEL_GAP
 	for k in _faces.size():
 		var q := MeshInstance3D.new()
 		q.mesh = _get_flag_quad()
@@ -357,26 +383,25 @@ static func _get_flag_quad() -> QuadMesh:
 
 
 ## 系统字体里没有旗帜字形，旗面只能画成纹理。
-## 缩到 0.34 单位时细节会糊，所以杆要够粗（10/96）、旗面要够大。
+## 缩到 0.34 单位时细节会糊，所以杆要够粗、旗面要小，两者都用近黑的深色。
 static func _flag_texture() -> ImageTexture:
 	var size := 96
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
 
-	var pole := Color(0.098, 0.075, 0.055)
-	var cloth := Color(0.514, 0.290, 0.043)
+	var ink := Color(0.125, 0.102, 0.078)
 
-	# 旗杆，略偏左以让整体重心居中
+	# 旗杆：14/96 宽，贯穿大半个高度
 	for y in range(10, 88):
-		for x in range(26, 38):
-			img.set_pixel(x, y, pole)
+		for x in range(26, 40):
+			img.set_pixel(x, y, ink)
 
-	# 三角旗面：底边贴杆，尖端朝右
-	for y in range(10, 56):
-		var t: float = 1.0 - absf(float(y) - 33.0) / 23.0
-		var x_end: int = 38 + int(t * 52.0)
-		for x in range(38, x_end):
-			img.set_pixel(x, y, cloth)
+	# 旗面：从杆上端向右的三角形，高度只有杆的三分之一
+	for y in range(12, 46):
+		var t: float = 1.0 - absf(float(y) - 29.0) / 17.0
+		var x_end: int = 40 + int(t * 38.0)
+		for x in range(40, x_end):
+			img.set_pixel(x, y, ink)
 
 	return ImageTexture.create_from_image(img)
 
