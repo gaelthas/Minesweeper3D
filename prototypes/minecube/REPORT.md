@@ -68,6 +68,7 @@ prototypes/minecube/
   scenes/main.tscn
   assets/build_mine.py             Blender 生成水雷的脚本
   assets/mine.glb                  导出的立体雷
+  assets/sfx/                      六个音效 + CREDITS.md
   scripts/board_logic.gd           纯逻辑，无节点依赖
   scripts/cell_view.gd             单块视图
   scripts/camera_rig.gd            环绕相机

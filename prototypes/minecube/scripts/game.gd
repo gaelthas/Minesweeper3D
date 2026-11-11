@@ -13,6 +13,7 @@ var cells: Array[CellView] = []
 var camera_rig: CameraRig
 var hud: Hud
 var settings: SettingsPanel
+var sfx: Sfx
 
 var rng := RandomNumberGenerator.new()
 
@@ -38,10 +39,14 @@ func _ready() -> void:
 	camera_rig.name = "CameraRig"
 	add_child(camera_rig)
 
+	sfx = Sfx.new()
+	sfx.name = "Sfx"
+	add_child(sfx)
+
 	hud = Hud.new()
 	hud.name = "Hud"
 	add_child(hud)
-	hud.restart_pressed.connect(new_game)
+	hud.restart_pressed.connect(_on_restart)
 	hud.settings_pressed.connect(_open_settings)
 	hud.quit_pressed.connect(_quit)
 
@@ -145,13 +150,26 @@ func new_game() -> void:
 	_paused_for_settings = false
 
 	hud.set_time(0.0)
-	hud.set_level("%d × %d × %d · %d %s" % [
-		board_side, board_side, board_side, mine_count, hud.t("雷", "mines")])
+	_update_level_text()
 	hud.update_stats(logic.mine_total, 0, 0, logic.cell_count() - logic.mine_total)
 	hud.set_status(hud.t("点击任意方块开始", "click any cube to begin"))
 
 
+func _update_level_text() -> void:
+	var suffix := ""
+	if sfx != null and sfx.muted:
+		suffix = " · " + hud.t("静音", "muted")
+	hud.set_level("%d × %d × %d · %d %s%s" % [
+		board_side, board_side, board_side, mine_count, hud.t("雷", "mines"), suffix])
+
+
+func _on_restart() -> void:
+	sfx.ui()
+	new_game()
+
+
 func _open_settings() -> void:
+	sfx.ui()
 	if _timing:
 		_paused_for_settings = true
 		_timing = false
@@ -159,6 +177,7 @@ func _open_settings() -> void:
 
 
 func _on_settings_applied(side: int, mines: int) -> void:
+	sfx.ui()
 	board_side = side
 	mine_count = mines
 	new_game()
@@ -238,7 +257,10 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if k.keycode == KEY_R:
-		new_game()
+		_on_restart()
+	elif k.keycode == KEY_M:
+		sfx.toggle_mute()
+		_update_level_text()
 
 
 func _pick(screen_pos: Vector2, mask: int = CellView.LAYER_SOLID) -> int:
@@ -272,16 +294,24 @@ func _on_reveal(screen_pos: Vector2) -> void:
 		_timing = true
 
 	var result := logic.reveal(idx)
-	_refresh_area(result["opened"] as Array)
+	var opened: Array = result["opened"]
+	_refresh_area(opened)
 	_refresh_stats()
 
 	if result["boom"]:
 		_timing = false
 		_show_all_mines()
+		sfx.boom()
 		hud.set_status(hud.t("踩到雷了 · 按 R 重开", "BOOM · press R to restart"))
-	elif logic.won:
-		_timing = false
-		hud.set_status(hud.t("清空了 · 按 R 再来一局", "CLEARED · press R for another"))
+	else:
+		if opened.size() >= 3:
+			sfx.flood(opened.size())
+		elif not opened.is_empty():
+			sfx.reveal()
+		if logic.won:
+			_timing = false
+			sfx.win()
+			hud.set_status(hud.t("清空了 · 按 R 再来一局", "CLEARED · press R for another"))
 
 
 func _on_flag(screen_pos: Vector2) -> void:
@@ -292,9 +322,14 @@ func _on_flag(screen_pos: Vector2) -> void:
 		return
 	if logic.states[idx] == BoardLogic.REVEALED:
 		return
+	var was_hidden := logic.states[idx] == BoardLogic.HIDDEN
 	logic.toggle_flag(idx)
 	_refresh(idx)
 	_refresh_stats()
+	if was_hidden:
+		sfx.flag()
+	else:
+		sfx.unflag()
 
 
 ## 和弦：在已揭示的数字格上，旗数与数字相等时一次揭开周围所有未插旗的格。
@@ -316,10 +351,14 @@ func _on_chord(screen_pos: Vector2) -> void:
 	if result["boom"]:
 		_timing = false
 		_show_all_mines()
+		sfx.boom()
 		hud.set_status(hud.t("踩到雷了 · 按 R 重开", "BOOM · press R to restart"))
-	elif logic.won:
-		_timing = false
-		hud.set_status(hud.t("清空了 · 按 R 再来一局", "CLEARED · press R for another"))
+	else:
+		sfx.chord()
+		if logic.won:
+			_timing = false
+			sfx.win()
+			hud.set_status(hud.t("清空了 · 按 R 再来一局", "CLEARED · press R for another"))
 
 
 func _refresh(i: int) -> void:

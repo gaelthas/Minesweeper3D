@@ -74,8 +74,8 @@ func _ready() -> void:
 	col.add_child(spacer)
 
 	_hint = UiKit.label(
-		t("左键揭示 · 右键插旗 · 左右键同按和弦 · 拖拽旋转 · 滚轮缩放 · R 重开",
-			"LMB reveal · RMB flag · LMB+RMB chord · drag orbit · wheel zoom · R restart"),
+		t("左键揭示 · 右键插旗 · 左右键同按和弦 · 拖拽旋转 · 滚轮缩放 · R 重开 · M 静音",
+			"LMB reveal · RMB flag · LMB+RMB chord · drag orbit · wheel zoom · R restart · M mute"),
 		14, UiKit.INK_SOFT)
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(_hint)

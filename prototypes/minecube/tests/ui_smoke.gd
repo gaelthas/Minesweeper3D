@@ -24,6 +24,7 @@ func _process(_delta: float) -> bool:
 			_check(_scene.cells.size() == 125, "5 阶应有 125 个方块，实际 %d" % _scene.cells.size())
 			_check(_scene.logic.mine_total == 12, "雷数应为 12，实际 %d" % _scene.logic.mine_total)
 			_check(_scene.settings.visible == false, "应用后设置浮层应关闭")
+			_check_audio()
 			_check_zero_hidden()
 			_prepare_chord_scene()
 		18:
@@ -35,9 +36,26 @@ func _process(_delta: float) -> bool:
 			_scene._timing = false
 		28:
 			print("")
+			# 测试脚本直接退出，引擎会报 ObjectDB 泄漏；主场景正常退出时是干净的
 			print("PASS" if _fails == 0 else "FAIL %d" % _fails)
 			return true
 	return false
+
+
+func _check_audio() -> void:
+	var streams := {
+		"reveal": Sfx.STREAM_REVEAL,
+		"flood": Sfx.STREAM_FLOOD,
+		"flag": Sfx.STREAM_FLAG,
+		"boom": Sfx.STREAM_BOOM,
+		"win": Sfx.STREAM_WIN,
+		"ui_click": Sfx.STREAM_UI,
+	}
+	for name in streams:
+		var s: AudioStream = streams[name]
+		_check(s != null and s.get_length() > 0.0,
+			"%s.mp3 应已导入且时长大于 0" % name)
+	_check(_scene.sfx != null, "音效池应已创建")
 
 
 func _check_zero_hidden() -> void:
