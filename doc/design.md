@@ -179,7 +179,7 @@ M ⊂ G \ ({p0} ∪ N(p0))
 | 洪泛展开（≥3 格） | Bubble_Pop | 0.18s | 按格数升调 0.92→1.34，同时提音量 |
 | 插旗 / 撤旗 | Wooden Blocks | 0.24s | 撤旗降调用同一个音 |
 | 和弦 | Bubble_Pop | 0.18s | 固定升到 1.28 |
-| 踩雷 | Bomb - Small | 1.78s | — |
+| 踩雷 | Short Explosion | 1.46s | — |
 | 胜利 | WinFantasia | 3.81s | — |
 | 按钮 | Videogame Menu BUTTON CLICK | 0.18s | — |
 
@@ -191,7 +191,7 @@ M ⊂ G \ ({p0} ∪ N(p0))
 
 插旗用的是两块木块相撞的实录（Neumann TLM 103 + API 调音台），下载量在这批里最低，但它是唯一一个录音说明精确到可以确定内容的命中——其余高下载量的"wood block"结果都是整段音乐。
 
-`boom.mp3` 是 CC-BY，署名要求写在 CREDITS.md 里；正式发布需要在致谢中出现。
+六个音全部是 CC0，没有署名义务。`assets/sfx/CREDITS.md` 里记了每条素材的下载量、评分和选型理由。
 
 `M` 键静音，状态显示在右上角的盘面信息里。
 
