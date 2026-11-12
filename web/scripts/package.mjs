@@ -10,8 +10,9 @@ const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.me
 manifest.id = process.env.MINI_APP_ID || manifest.id;
 manifest.version = process.env.MINI_APP_VERSION || manifest.version;
 
-if (!process.env.MINI_APP_ID) {
-  console.warn('提示：未设置 MINI_APP_ID，manifest 里用的是占位 ID，上传前务必替换。');
+const PLACEHOLDER_ID = '01a1966e-935a-79e0-8c76-9b0f7552c578';
+if (manifest.id === PLACEHOLDER_ID) {
+  console.warn('提示：manifest 里还是官方示例的 ID，上传会被拒（APP_ID_MISMATCH）。');
 }
 
 const files = {};
