@@ -43,7 +43,7 @@ Web 版 · v0.1.0 · Godot 版 · v0.5.0
 
 ## Web 版
 
-单个 HTML 文件，双击即玩，不需要服务器、不联网。Three.js、样式、六段音效全部内联，约 700 KB。
+单个 HTML 文件，双击即玩，不需要服务器、不联网。Three.js、样式、六段音效、方块模型全部内联，约 780 KB。
 
 ```sh
 cd web
@@ -55,6 +55,9 @@ npm run build    # 产出 dist/index.html
 构建产物 `web/dist/index.html` 已入库，也可以直接下载 [Releases](https://github.com/gaelthas/Minesweeper3D/releases) 里的附件。
 
 调试用 `?seed=123` 固定局面，`window.minecube` 暴露了 `world`、`state`、`settings`、`ui`。
+
+方块模型不用代码现搓：Web 版直接内联 Godot 版那份 Blender 产物（`assets/cube_rounded.glb`），
+运行时用一个 40 行的 GLB 读取器取出顶点，不引 GLTFLoader。两个版本的模型因此完全一致。
 
 ## Godot 版
 
@@ -106,7 +109,8 @@ prototypes/
 web/                     Three.js 实现
   src/
     logic.js             棋盘逻辑，不碰 DOM，可被 node 直接测
-    geometry.js          削角立方体几何与数字贴图
+    cube-model.js        解析内联的 GLB，取出方块几何
+    geometry.js          数字与标记的贴图
     scene.js             场景、相机、格子视图、拾取
     ui.js / style.css    DOM 界面
     main.js              流程与输入

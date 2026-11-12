@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import { makeCubeGeometry, makeNumberTexture, makeFlagTexture, makeQuestionTexture } from './geometry.js';
+import { makeNumberTexture, makeFlagTexture, makeQuestionTexture } from './geometry.js';
+import { loadCubeGeometry } from './cube-model.js';
 import { Board, HIDDEN, REVEALED, FLAGGED, QUESTION } from './logic.js';
 
 // 立方体边长与收缩比例，和 Godot 版保持一致
 export const HIDDEN_SIZE = 0.88;
 export const REVEALED_SIZE = 0.70;
-export const CUT = 0.30;
 // 格距超过这个值，方块之间的缝隙已经宽到能看见所有面
 export const OPEN_VIEW_PITCH = 1.15;
 
@@ -64,16 +64,16 @@ export class World {
     fill.position.set(8, -4, -9);
     this.scene.add(fill);
 
-    this.cubeGeo = makeCubeGeometry(CUT, 5);
+    this.cubeGeo = loadCubeGeometry();
     this.faceGeo = new THREE.PlaneGeometry(1, 1);
 
     this.materials = {
-      hidden: new THREE.MeshStandardMaterial({ color: COLORS.hidden, roughness: 0.62, metalness: 0, flatShading: true }),
-      flag: new THREE.MeshStandardMaterial({ color: COLORS.flag, roughness: 0.78, metalness: 0, flatShading: true }),
-      question: new THREE.MeshStandardMaterial({ color: COLORS.question, roughness: 0.78, metalness: 0, flatShading: true }),
-      open: new THREE.MeshStandardMaterial({ color: COLORS.open, roughness: 0.55, metalness: 0, flatShading: true }),
-      mine: new THREE.MeshStandardMaterial({ color: COLORS.mine, roughness: 0.45, metalness: 0, flatShading: true }),
-      hit: new THREE.MeshStandardMaterial({ color: COLORS.hit, roughness: 0.4, emissive: 0xff2222, emissiveIntensity: 0.35, flatShading: true }),
+      hidden: new THREE.MeshStandardMaterial({ color: COLORS.hidden, roughness: 0.62, metalness: 0 }),
+      flag: new THREE.MeshStandardMaterial({ color: COLORS.flag, roughness: 0.78, metalness: 0 }),
+      question: new THREE.MeshStandardMaterial({ color: COLORS.question, roughness: 0.78, metalness: 0 }),
+      open: new THREE.MeshStandardMaterial({ color: COLORS.open, roughness: 0.55, metalness: 0 }),
+      mine: new THREE.MeshStandardMaterial({ color: COLORS.mine, roughness: 0.45, metalness: 0 }),
+      hit: new THREE.MeshStandardMaterial({ color: COLORS.hit, roughness: 0.4, emissive: 0xff2222, emissiveIntensity: 0.35 }),
     };
 
     this.numberMats = [];
