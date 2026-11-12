@@ -1,0 +1,51 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（如 v0.1.0）'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - name: 逻辑层测试
+        run: npm test
+
+      - name: 构建单文件
+        run: npm run build
+
+      - name: 产物改名，带上版本号
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          cp dist/index.html "../minecube3d-${TAG}.html"
+          ls -lh "../minecube3d-${TAG}.html"
+
+      - name: 发布
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: MineCube 3D ${{ github.event.inputs.tag || github.ref_name }}
+          files: minecube3d-*.html
+          generate_release_notes: true
+          fail_on_unmatched_files: true

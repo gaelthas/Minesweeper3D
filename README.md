@@ -1,8 +1,10 @@
 # MineCube 3D
 
-把扫雷搬进一个可旋转的三维立方体。规则针对三维重写过，不是把 2D 棋盘贴到六个面上。
+把扫雷搬进一个可旋转的三维立方体。规则针对三维重写过，没有直接沿用 2D 的邻域。
 
-Godot 4.7.2 · 当前版本 0.5.0 · 原型阶段
+同一套玩法有两个实现：**Godot 桌面版**（原型，`prototypes/minecube`）和 **Web 版**（Three.js，打包成单个 HTML，`web/`）。
+
+Web 版 · v0.1.0 · Godot 版 · v0.5.0
 
 ## 它和 2D 扫雷的差别
 
@@ -23,7 +25,7 @@ Godot 4.7.2 · 当前版本 0.5.0 · 原型阶段
 
 ## 操作
 
-默认映射，可在「选项」里逐键改。
+两个版本的默认映射一致，都可以改。
 
 | 输入 | 动作 |
 | --- | --- |
@@ -37,9 +39,24 @@ Godot 4.7.2 · 当前版本 0.5.0 · 原型阶段
 | `M` | 静音 |
 | `Esc` | 关闭最上层浮层 |
 
-已揭示的数字方块会吃掉点击，不穿透。要挖内层，从方块之间的缝隙瞄——右下角的「间距」滑块可以拉开方块距离（100%–200%）。
+已揭示的数字方块会吃掉点击，不穿透。要挖内层，从方块之间的缝隙瞄——界面右下角的「间距」滑块可以拉开方块中心距（100%–200%），方块尺寸不变。
 
-## 运行
+## Web 版
+
+单个 HTML 文件，双击即玩，不需要服务器、不联网。Three.js、样式、六段音效全部内联，约 700 KB。
+
+```sh
+cd web
+npm install
+npm run dev      # 开发，带热更新
+npm run build    # 产出 dist/index.html
+```
+
+构建产物 `web/dist/index.html` 已入库，也可以直接下载 [Releases](https://github.com/gaelthas/Minesweeper3D/releases) 里的附件。
+
+调试用 `?seed=123` 固定局面，`window.minecube` 暴露了 `world`、`state`、`settings`、`ui`。
+
+## Godot 版
 
 需要 Godot 4.7.2（其他 4.x 未验证）。
 
@@ -47,34 +64,37 @@ Godot 4.7.2 · 当前版本 0.5.0 · 原型阶段
 godot --path prototypes/minecube
 ```
 
-也可以直接用编辑器打开 `prototypes/minecube/project.godot`。
+也可以直接用编辑器打开 `prototypes/minecube/project.godot`。默认盘面 5×5×5、38 颗雷（30% 密度），阶数可调到 3–13；13 阶全开实测 34.6 FPS，是当前节点数下的实际上限。
 
-默认盘面 5×5×5、38 颗雷（30% 密度）。阶数可在「开局」里调到 3–13；13 阶全开实测 34.6 FPS，是当前节点数下的实际上限。
-
-选项页管应用本身：显示模式、分辨率、音量与静音、垂直同步、帧率显示、鼠标三键功能。改动即时生效并写入 `user://settings.cfg`。
+选项页管显示模式、分辨率、音量、垂直同步、帧率显示、鼠标三键功能，改动即时生效并写入 `user://settings.cfg`。
 
 ## 测试
 
-两条命令都在仓库根执行：
+两套实现各自有测试，都在仓库根执行。
 
 ```sh
+# Web：逻辑层（node:test，纯函数，不依赖浏览器）
+cd web && npm test
+
+# Web：端到端（需要本机 Chromium 内核浏览器，macOS 默认找系统 Chrome）
+cd web && npm run build && node scripts/e2e.mjs
+
+# Godot：逻辑层与界面冒烟
 godot --headless --path prototypes/minecube -s res://tests/logic_test.gd
 godot --headless --path prototypes/minecube -s res://tests/ui_smoke.gd
 ```
 
-`logic_test.gd` 是纯逻辑层自检，不依赖场景，共 67 项断言：邻域、计数、首击安全、按面展开、按平面和弦、胜负、随机盘面的计数不变量。
-
-`ui_smoke.gd` 覆盖需要场景树的部分：射线拾取、碰撞盒尺寸、和弦的事件链路、中键平移、浮层阻挡、设置持久化。headless 可跑。
+Web 端的 e2e 用真实浏览器派发鼠标事件，覆盖揭示、三态标记、左右同按和弦、间距滑块、浮层开关、结算弹窗和控制台报错。
 
 ## 目录
 
 ```
 doc/
   design.md              设计决策与踩过的坑（比 README 长得多）
-  shots/                 截图，由 tests/capture.gd 生成
+  shots/                 Godot 版截图，由 tests/capture.gd 生成
 prototypes/
   index.md               原型索引
-  minecube/
+  minecube/              Godot 实现
     assets/
       build_cube.py      用 Blender 生成削角方块模型
       cube_rounded.glb   产物，已入库
@@ -83,26 +103,42 @@ prototypes/
     scripts/             逻辑层、视图层、UI 各自独立
     tests/               逻辑自检、UI 冒烟、截图、平衡探针
     REPORT.md            概念原型报告（记录的是早期规则下的数据）
+web/                     Three.js 实现
+  src/
+    logic.js             棋盘逻辑，不碰 DOM，可被 node 直接测
+    geometry.js          削角立方体几何与数字贴图
+    scene.js             场景、相机、格子视图、拾取
+    ui.js / style.css    DOM 界面
+    main.js              流程与输入
+  test/logic.test.js     逻辑层测试
+  scripts/e2e.mjs        端到端测试
+  dist/index.html        单文件产物
+.github/workflows/
+  ci.yml                 推送到 master 时跑测试与构建
+  release.yml            推 v* 标签时构建并发布
 ```
 
-方块模型不手改：改 `assets/build_cube.py` 里的参数后用 Blender 重新导出，再让 Godot 重导。
+## 发布
+
+推一个 `v*` 标签，release workflow 会自动跑测试、构建单文件、把 `minecube3d-<tag>.html` 挂到 GitHub Release 上。
 
 ```sh
-/Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup -noaudio \
-  -P prototypes/minecube/assets/build_cube.py
+git tag v0.1.0 && git push origin v0.1.0
 ```
+
+版本号只在 `web/package.json` 里改一次，构建时注入到界面；Godot 版的版本在 `prototypes/minecube/project.godot` 的 `config/version`。
 
 ## 已知状态
 
-- 原型阶段，建成了但还没有人完整试玩过，因此没有 PROCEED / PIVOT / KILL 结论。
+- 两套实现都还没做过完整的人工试玩评估，因此没有 PROCEED / PIVOT / KILL 结论。
 - `REPORT.md` 里的平衡数据出自 26 邻域时代，和现在每面计数的规则不一致，只作历史记录看。当前规则的说明以 `doc/design.md` 为准。
-- 只在 macOS 上构建和测试过。字体走系统字体回退（macOS / Linux / Windows 各留了路径），未在其他平台实跑。
+- Godot 版只在 macOS 上构建和测试过。Web 版的 e2e 也只在本机 Chrome 跑过，CI 里只跑逻辑测试与构建。
 
 ## 许可
 
 代码与文档采用 [MIT 许可](LICENSE)。
 
-`prototypes/minecube/assets/sfx/` 下的音效全部来自 Freesound 的 CC0 素材，按 CC0 分发，署名与来源见该目录的 `CREDITS.md`。
+`prototypes/minecube/assets/sfx/` 下的音效全部来自 Freesound 的 CC0 素材，按 CC0 分发，署名与来源见该目录的 `CREDITS.md`。Web 版构建时把同一批文件内联进 HTML。
 
 ## 致谢
 
