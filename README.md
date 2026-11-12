@@ -103,3 +103,9 @@ prototypes/
 代码与文档采用 [MIT 许可](LICENSE)。
 
 `prototypes/minecube/assets/sfx/` 下的音效全部来自 Freesound 的 CC0 素材，按 CC0 分发，署名与来源见该目录的 `CREDITS.md`。
+
+## 致谢
+
+[LINUX DO Community](https://linux.do/)
+
+Thanks to the Linux.do community for its support and contributions.
