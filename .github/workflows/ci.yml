@@ -23,6 +23,13 @@ jobs:
         run: npm test
       - name: 构建单文件
         run: npm run build
+      - name: 入库产物是否与源码同步
+        run: |
+          if ! git -C "$GITHUB_WORKSPACE" diff --quiet -- web/dist/index.html; then
+            echo "::error::web/dist/index.html 与源码不同步，先在本地 npm run build 再提交"
+            exit 1
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: minecube3d-html
