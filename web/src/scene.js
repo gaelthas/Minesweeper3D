@@ -397,6 +397,8 @@ export class World {
     // 可见面集合变了才需要重画数字
     if (wasOpen !== this.openView) {
       for (let i = 0; i < this.cells.length; i++) if (this.cells[i]) this._applyCell(i);
+      // 重画按 states 走，会把结算时摊开的雷盖回方块，补一遍
+      if (board.gameOver && !board.won) this.markMines();
     }
     this.dirtyFacing = true;
   }

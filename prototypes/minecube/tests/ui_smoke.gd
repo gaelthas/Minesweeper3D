@@ -277,6 +277,8 @@ func _test_audit_fixes() -> void:
 	_check(_scene.camera_rig.pivot.is_equal_approx(Vector3.ZERO),
 		"换局应复位视角中心，实际 %s" % str(_scene.camera_rig.pivot))
 
+	_test_spacing_keeps_mines()
+
 
 func _test_settings_page() -> void:
 	var page: SettingsPage = _scene.settings_page
@@ -339,6 +341,28 @@ func _test_overlay_blocking() -> void:
 	_scene._close_top_overlay()
 	_check(not _scene.settings.visible, "再关一次应关掉开局浮层")
 	_check(not _scene._ui_blocking(), "全部关闭后不应再阻挡输入")
+
+
+## 踩雷后调间距：重绘会按 states 走，必须把摊开的雷补回来
+func _test_spacing_keeps_mines() -> void:
+	_scene.board_side = 3
+	_scene.mine_count = 1
+	_scene.new_game()
+	var logic = _scene.logic
+	var mine: int = logic.index_of(Vector3i(0, 0, 0))
+	logic.mines[mine] = 1
+	logic.recompute_counts()
+	logic.generated = true
+
+	var boom: Dictionary = logic.reveal(mine)
+	_scene._show_all_mines()
+	var cell = _scene.cells[mine]
+	_check(boom["boom"] and cell._mine != null and cell._mine.visible, "踩雷后应显示雷模型")
+
+	_scene._on_spacing_changed(135.0)
+	_check(cell._mine.visible, "调大间距跨过可见面阈值后，雷不该消失")
+	_scene._on_spacing_changed(100.0)
+	_check(cell._mine.visible, "再拖回原间距，雷仍在")
 
 
 func _check(cond: bool, msg: String) -> void:

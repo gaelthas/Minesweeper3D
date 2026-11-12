@@ -226,6 +226,27 @@ try {
 
   check(errors.length === 0, `控制台无报错${errors.length ? '：' + errors.slice(0, 2).join(' | ') : ''}`);
 
+  // 踩雷后调间距：重绘会把摊开的雷盖回方块，这里守住
+  const spacingKeepsMines = await page.evaluate(() => {
+    const { world, state } = window.minesweeper3d;
+    const b = state.board;
+    const mine = b.mineIndices()[0];
+    b.hitIndex = mine;
+    b.gameOver = true;
+    b.won = false;
+    world.markMines();
+    const cell = world.cells[mine];
+    const before = !!(cell.mine && cell.mine.visible) && !cell.cube.visible;
+    world.relayout(1.35);
+    const after = !!(cell.mine && cell.mine.visible) && !cell.cube.visible;
+    world.relayout(1.0);
+    const back = !!(cell.mine && cell.mine.visible);
+    return { before, after, back };
+  });
+  check(spacingKeepsMines.before, '踩雷后雷模型显示、方块隐藏');
+  check(spacingKeepsMines.after, '调大间距跨过阈值后雷不消失');
+  check(spacingKeepsMines.back, '拖回原间距雷仍在');
+
   // 结算弹窗：直接调 UI，验证文案与按钮
   await page.evaluate(() => window.minesweeper3d.ui.showResult(true, 83.4, 5, 38));
   await new Promise((r) => setTimeout(r, 150));

@@ -504,6 +504,9 @@ func _sync_open_view() -> void:
 	_open_view = open
 	for c in cells:
 		_refresh(c.index)
+	# 重刷按 states 走，会把结算时摊开的雷盖回方块，补一遍
+	if logic != null and logic.game_over and not logic.won:
+		_show_all_mines()
 
 
 ## 按当前间距重新摆放所有方块——只动位置，方块尺寸不变
