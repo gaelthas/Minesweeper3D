@@ -23,6 +23,7 @@ files['app.css'] = await readFile(new URL('../build/app/app.css', import.meta.ur
 // 包内路径与 Godot 工程里的源文件不一定同名，这里显式映射
 const SOURCE_OF = {
   'assets/models/cube.glb': 'cube_rounded.glb',
+  'assets/models/mine.glb': 'mine.glb',
 };
 
 for (const path of manifest.assets || []) {

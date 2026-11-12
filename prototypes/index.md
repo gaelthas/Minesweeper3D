@@ -4,7 +4,7 @@
 
 | 概念 | 日期 | 路径 | 结论 | 报告 |
 | --- | --- | --- | --- | --- |
-| MineCube 3D（3D 扫雷） | 2026-11-10 | Engine / Godot 4.7.2 | NOT ASSESSED（已建成，未试玩） | [REPORT.md](minecube/REPORT.md) |
+| Minesweeper3D（3D 扫雷） | 2026-11-10 | Engine / Godot 4.7.2 | NOT ASSESSED（已建成，未试玩） | [REPORT.md](minecube/REPORT.md) |
 
 ## 说明
 

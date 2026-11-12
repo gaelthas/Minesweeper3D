@@ -1,13 +1,13 @@
 import './style.css';
 import { Board, REVEALED, FLAGGED, seededRng } from './logic.js';
 import { World } from './scene.js';
-import { loadCubeGeometry } from './cube-model.js';
+import { loadCubeGeometry, loadModel } from './cube-model.js';
 import { Sfx } from './audio.js';
 import { createUi } from './ui.js';
 import { connectHost } from '@platform';
 import messages from './strings.json';
 
-const STORE_KEY = 'minecube3d.settings';
+const STORE_KEY = 'minesweeper3d.settings';
 const DRAG_THRESHOLD = 4;
 const CHORD_SLOP = 14;
 const ACTIONS = ['none', 'reveal', 'flag', 'chord', 'pan'];
@@ -440,8 +440,11 @@ async function boot() {
     },
   }, t);
 
-  const cubeGeometry = await loadCubeGeometry();
-  world = new World(canvas, cubeGeometry);
+  const [cubeGeometry, mineParts] = await Promise.all([
+    loadCubeGeometry(),
+    loadModel('models/mine.glb'),
+  ]);
+  world = new World(canvas, cubeGeometry, mineParts);
   applyTheme(theme, world);
   host.onThemeChange((next) => applyTheme(next, world));
 
@@ -451,7 +454,7 @@ async function boot() {
   ui.syncVolume(settings.volume);
   ui.syncMute(settings.muted);
 
-  window.minecube = { world, state, settings, ui };
+  window.minesweeper3d = { world, state, settings, ui };
 
   await host.ready();
   requestAnimationFrame(loop);

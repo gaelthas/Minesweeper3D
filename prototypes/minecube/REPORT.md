@@ -1,4 +1,4 @@
-# MineCube 3D · 概念原型报告
+# Minesweeper3D · 概念原型报告
 
 - 日期：2026-11-10
 - 路径：Engine（Godot 4.7.2 stable）

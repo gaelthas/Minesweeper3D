@@ -50,21 +50,21 @@ try {
   });
 
   await page.goto(`${pathToFileURL(target).href}?seed=20261112`);
-  await page.waitForFunction(() => window.minecube && window.minecube.state.board, { timeout: 15000 });
+  await page.waitForFunction(() => window.minesweeper3d && window.minesweeper3d.state.board, { timeout: 15000 });
   await new Promise((r) => setTimeout(r, 600));
 
   const stats = () => page.evaluate(() => ({
-    mines: window.minecube.state.board.mineTotal,
-    revealed: window.minecube.state.board.revealedCount,
-    flags: window.minecube.state.board.flagCount,
-    over: window.minecube.state.board.gameOver,
-    generated: window.minecube.state.board.generated,
+    mines: window.minesweeper3d.state.board.mineTotal,
+    revealed: window.minesweeper3d.state.board.revealedCount,
+    flags: window.minesweeper3d.state.board.flagCount,
+    over: window.minesweeper3d.state.board.gameOver,
+    generated: window.minesweeper3d.state.board.generated,
   }));
 
   // 找一个能点到的方块：把中心方块投影到屏幕坐标
   const centerOf = (x, y, z) =>
     page.evaluate((x, y, z) => {
-      const { world, state } = window.minecube;
+      const { world, state } = window.minesweeper3d;
       const i = state.board.index(x, y, z);
       const cell = world.cells[i];
       if (!cell) return null;
@@ -73,7 +73,7 @@ try {
       return { x: (v.x * 0.5 + 0.5) * 1280, y: (-v.y * 0.5 + 0.5) * 720, index: i };
     }, x, y, z);
 
-  const side = await page.evaluate(() => window.minecube.state.board.side);
+  const side = await page.evaluate(() => window.minesweeper3d.state.board.side);
   const hi = side - 1;
   const target1 = await centerOf(hi, hi, hi);
   check(target1 !== null, '取到面向相机那个角格的屏幕坐标');
@@ -91,7 +91,7 @@ try {
   // 找一个「从相机看过去能直接点到」的未揭示格：
   // 光靠投影中心不行，深处的格子会被外层挡住
   const hidden = await page.evaluate(() => {
-    const { state, world } = window.minecube;
+    const { state, world } = window.minesweeper3d;
     const b = state.board;
     const W = 1280;
     const H = 720;
@@ -111,22 +111,22 @@ try {
   if (spot) {
     await page.mouse.click(spot.x, spot.y, { button: 'right' });
     await new Promise((r) => setTimeout(r, 150));
-    let s = await page.evaluate((i) => window.minecube.state.board.states[i], spot.index);
+    let s = await page.evaluate((i) => window.minesweeper3d.state.board.states[i], spot.index);
     check(s === 2, '右键插旗');
     await page.mouse.click(spot.x, spot.y, { button: 'right' });
     await new Promise((r) => setTimeout(r, 150));
-    s = await page.evaluate((i) => window.minecube.state.board.states[i], spot.index);
+    s = await page.evaluate((i) => window.minesweeper3d.state.board.states[i], spot.index);
     check(s === 3, '右键第二下变问号');
     await page.mouse.click(spot.x, spot.y, { button: 'right' });
     await new Promise((r) => setTimeout(r, 150));
-    s = await page.evaluate((i) => window.minecube.state.board.states[i], spot.index);
+    s = await page.evaluate((i) => window.minesweeper3d.state.board.states[i], spot.index);
     check(s === 0, '右键第三下回到未标记');
   } else {
     check(false, '没找到可标记的格子');
   }
 
   // 间距滑块：只挪位置，不改方块尺寸
-  const posBefore = await page.evaluate(() => window.minecube.world.cells[0].root.position.x);
+  const posBefore = await page.evaluate(() => window.minesweeper3d.world.cells[0].root.position.x);
   await page.evaluate(() => {
     const el = document.getElementById('spacing');
     el.value = '150';
@@ -134,15 +134,15 @@ try {
   });
   await new Promise((r) => setTimeout(r, 200));
   const moved = await page.evaluate(() => ({
-    pos: window.minecube.world.cells[0].root.position.x,
-    scale: window.minecube.world.cells[0].cube.scale.x,
+    pos: window.minesweeper3d.world.cells[0].root.position.x,
+    scale: window.minesweeper3d.world.cells[0].cube.scale.x,
   }));
   check(Math.abs(moved.pos - posBefore) > 1e-6, '间距变化后方块位置改变');
   check(Math.abs(moved.scale - 0.88) < 1e-6, '方块尺寸不变（0.88）');
 
   // 和弦：左右同按。先探出射线实际命中的面，再按那一面的数字插旗
   const chordSetup = await page.evaluate(() => {
-    const { state, world } = window.minecube;
+    const { state, world } = window.minesweeper3d;
     const b = state.board;
     const W = 1280;
     const H = 720;
@@ -185,8 +185,8 @@ try {
     await page.mouse.up({ button: 'right' });
     await new Promise((r) => setTimeout(r, 250));
     const after = await page.evaluate(() => ({
-      revealed: window.minecube.state.board.revealedCount,
-      over: window.minecube.state.board.gameOver,
+      revealed: window.minesweeper3d.state.board.revealedCount,
+      over: window.minesweeper3d.state.board.gameOver,
     }));
     check(after.revealed > chordSetup.revealed || after.over,
       `左右同按触发和弦（面 ${chordSetup.face}，需 ${chordSetup.need} 旗，${chordSetup.revealed} → ${after.revealed}）`);
@@ -195,7 +195,7 @@ try {
   }
 
   // 和弦可能踩雷，结算弹窗会盖住界面；先收掉再测浮层
-  await page.evaluate(() => window.minecube.ui.hideResult());
+  await page.evaluate(() => window.minesweeper3d.ui.hideResult());
   await new Promise((r) => setTimeout(r, 100));
 
   // 布局：浮层开关
@@ -211,7 +211,7 @@ try {
 
   // 结算弹窗：直接揭示到胜利
   await page.evaluate(() => {
-    const { state, world } = window.minecube;
+    const { state, world } = window.minesweeper3d;
     const b = state.board;
     for (let i = 0; i < b.total; i++) {
       if (b.mines[i] === 0) {
@@ -219,15 +219,15 @@ try {
         world.refreshArea(res.opened);
       }
     }
-    window.minecube.ui?.updateStats?.();
+    window.minesweeper3d.ui?.updateStats?.();
   });
   await new Promise((r) => setTimeout(r, 300));
-  const won = await page.evaluate(() => window.minecube.state.board.won);
+  const won = await page.evaluate(() => window.minesweeper3d.state.board.won);
 
   check(errors.length === 0, `控制台无报错${errors.length ? '：' + errors.slice(0, 2).join(' | ') : ''}`);
 
   // 结算弹窗：直接调 UI，验证文案与按钮
-  await page.evaluate(() => window.minecube.ui.showResult(true, 83.4, 5, 38));
+  await page.evaluate(() => window.minesweeper3d.ui.showResult(true, 83.4, 5, 38));
   await new Promise((r) => setTimeout(r, 150));
   check(await page.$eval('#result', (e) => !e.hidden), '结算弹窗可以打开');
   check((await page.$eval('#result-title', (e) => e.textContent)) === '清空', '胜利标题是「清空」');
@@ -235,7 +235,7 @@ try {
   await page.click('#result-again');
   await new Promise((r) => setTimeout(r, 300));
   const restarted = await page.evaluate(() => ({
-    revealed: window.minecube.state.board.revealedCount,
+    revealed: window.minesweeper3d.state.board.revealedCount,
     hidden: document.getElementById('result').hidden,
   }));
   check(restarted.hidden, '再来一局会关掉弹窗');

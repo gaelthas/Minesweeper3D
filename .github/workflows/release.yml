@@ -38,14 +38,14 @@ jobs:
       - name: 产物改名，带上版本号
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          cp dist/index.html "../minecube3d-${TAG}.html"
-          ls -lh "../minecube3d-${TAG}.html"
+          cp dist/index.html "../minesweeper3d-${TAG}.html"
+          ls -lh "../minesweeper3d-${TAG}.html"
 
       - name: 发布
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: MineCube 3D ${{ github.event.inputs.tag || github.ref_name }}
-          files: minecube3d-*.html
+          name: Minesweeper3D ${{ github.event.inputs.tag || github.ref_name }}
+          files: minesweeper3d-*.html
           generate_release_notes: true
           fail_on_unmatched_files: true

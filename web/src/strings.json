@@ -39,7 +39,7 @@
     "resultDetail": "{side} × {side} × {side} · {mines} 颗雷",
     "stats": "雷 {mines}　旗 {flags}　已开 {opened}/{need}",
     "boardHint": "{side} × {side} × {side} · 共 {total} 格 · 密度 {density}% · 推荐 {rec} 颗",
-    "version": "MineCube 3D  v{version}"
+    "version": "Minesweeper3D  v{version}"
   },
   "en": {
     "restart": "Restart",
@@ -81,6 +81,6 @@
     "resultDetail": "{side} × {side} × {side} · {mines} mines",
     "stats": "Mines {mines}　Flags {flags}　Open {opened}/{need}",
     "boardHint": "{side} × {side} × {side} · {total} cells · {density}% · suggest {rec}",
-    "version": "MineCube 3D  v{version}"
+    "version": "Minesweeper3D  v{version}"
   }
 }

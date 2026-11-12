@@ -16,6 +16,7 @@ export const ASSET_PATHS = [
   'sfx/boom.mp3',
   'sfx/win.mp3',
   'models/cube.glb',
+  'models/mine.glb',
 ];
 
 export async function loadAsset(path) {

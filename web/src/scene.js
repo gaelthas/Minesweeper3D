@@ -40,7 +40,7 @@ export function faceFromNormal(n) {
 }
 
 export class World {
-  constructor(canvas, cubeGeometry) {
+  constructor(canvas, cubeGeometry, mineParts = []) {
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -64,6 +64,7 @@ export class World {
     this.scene.add(fill);
 
     this.cubeGeo = cubeGeometry;
+    this.mineParts = mineParts;
     this.faceGeo = new THREE.PlaneGeometry(1, 1);
 
     this.materials = {
@@ -74,6 +75,15 @@ export class World {
       mine: new THREE.MeshStandardMaterial({ color: COLORS.mine, roughness: 0.45, metalness: 0 }),
       hit: new THREE.MeshStandardMaterial({ color: COLORS.hit, roughness: 0.4, emissive: 0xff2222, emissiveIntensity: 0.35 }),
     };
+
+    // 踩中的那颗整体染红并自发光，和 Godot 版一致
+    this.hitMineMaterials = mineParts.map((part) => {
+      const material = part.material.clone();
+      material.color.setRGB(0.86, 0.22, 0.24, THREE.LinearSRGBColorSpace);
+      material.emissive = new THREE.Color(0xd8353c);
+      material.emissiveIntensity = 0.75;
+      return material;
+    });
 
     this.numberMats = [];
     for (let n = 1; n <= 9; n++) {
@@ -206,7 +216,7 @@ export class World {
       marks.push(mark);
     }
 
-    return { root, cube, faces, marks, sign: 0, mask: 0, planes: new Array(6).fill(null) };
+    return { root, cube, faces, marks, sign: 0, mask: 0, planes: new Array(6).fill(null), mine: undefined };
   }
 
   /** 相邻格是否已揭示（决定哪些面朝外可见） */
@@ -239,6 +249,7 @@ export class World {
     for (const m of cell.marks) m.visible = false;
     cell.mask = 0;
     cell.planes.fill(null);
+    if (cell.mine) cell.mine.visible = false;
 
     if (state === FLAGGED || state === QUESTION) {
       const size = REVEALED_SIZE;
@@ -320,20 +331,52 @@ export class World {
     this.dirtyFacing = true;
   }
 
+  /** 结算时把雷摊开：用模型替换方块，踩中的那颗放大并发光 */
   markMines() {
     const board = this.board;
     for (const i of board.mineIndices()) {
       const cell = this.cells[i];
       if (!cell) continue;
+      // 已经正确插旗的雷位保留旗面，不被雷模型盖掉
       if (board.states[i] === FLAGGED) continue;
-      cell.cube.visible = true;
-      cell.cube.material = i === board.hitIndex ? this.materials.hit : this.materials.mine;
-      cell.cube.scale.setScalar(i === board.hitIndex ? 0.78 : 0.66);
+
+      cell.cube.visible = false;
       for (const f of cell.faces) f.visible = false;
       for (const m of cell.marks) m.visible = false;
       cell.planes.fill(null);
+
+      const mine = this._mineFor(cell);
+      if (!mine) continue;
+      const hit = i === board.hitIndex;
+      mine.visible = true;
+      // 模型原始直径约 0.79，格子是 1.0；缩到 0.62 才像嵌在格子里
+      mine.scale.setScalar(hit ? 0.78 : 0.62);
+      mine.rotation.y = ((i * 37) % 17) * 0.37;
+      for (const child of mine.children) {
+        child.material = hit ? this.hitMineMaterials[child.userData.partIndex] : child.userData.baseMaterial;
+      }
     }
     this.dirtyFacing = true;
+  }
+
+  /** 雷模型按需创建：只有结算时才需要，别在开局就铺满整盘 */
+  _mineFor(cell) {
+    if (cell.mine !== undefined) return cell.mine;
+    if (!this.mineParts.length) {
+      cell.mine = null;
+      return null;
+    }
+    const group = new THREE.Group();
+    this.mineParts.forEach((part, index) => {
+      const mesh = new THREE.Mesh(part.geometry, part.material);
+      mesh.userData.baseMaterial = part.material;
+      mesh.userData.partIndex = index;
+      group.add(mesh);
+    });
+    group.visible = false;
+    cell.root.add(group);
+    cell.mine = group;
+    return group;
   }
 
   /** 间距只挪位置，方块尺寸不变 */

@@ -35,6 +35,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: minecube3d-html
+          name: minesweeper3d-html
           path: web/dist/index.html
           if-no-files-found: error

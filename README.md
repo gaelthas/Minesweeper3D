@@ -1,4 +1,4 @@
-# MineCube 3D
+# Minesweeper3D
 
 把扫雷搬进一个可旋转的三维立方体。规则针对三维重写过，没有直接沿用 2D 的邻域。
 
@@ -6,7 +6,7 @@
 
 Web 版 · v0.1.0 · Godot 版 · v0.5.0
 
-在线试玩：[gaelthas.github.io/gaelthas/minecube](https://gaelthas.github.io/gaelthas/minecube/)
+在线试玩：[gaelthas.github.io/gaelthas/minecube](https://gaelthas.github.io/gaelthas/minesweeper3d/)
 
 ## 它和 2D 扫雷的差别
 
@@ -14,7 +14,7 @@ Web 版 · v0.1.0 · Godot 版 · v0.5.0
 
 这个原型改成**每个面独立计数**：某一面显示几，就是该面所在平面内 8 个邻格里的雷数。
 
-| | 2D 扫雷 | MineCube 3D |
+| | 2D 扫雷 | Minesweeper3D |
 | --- | --- | --- |
 | 数字含义 | 周围 8 格的雷数 | 每个面各数一套：该面所在平面的 8 格 |
 | 六面全为 0 | — | 方块直接消失，露出后面的格子 |
@@ -56,7 +56,7 @@ npm run build    # 产出 dist/index.html（单文件）
 
 构建产物 `web/dist/index.html` 已入库，也可以直接下载 [Releases](https://github.com/gaelthas/Minesweeper3D/releases) 里的附件。
 
-调试用 `?seed=123` 固定局面，`window.minecube` 暴露了 `world`、`state`、`settings`、`ui`。
+调试用 `?seed=123` 固定局面，`window.minesweeper3d` 暴露了 `world`、`state`、`settings`、`ui`。
 
 方块模型不用代码现搓：Web 版直接内联 Godot 版那份 Blender 产物（`assets/cube_rounded.glb`），
 运行时用一个 40 行的 GLB 读取器取出顶点，不引 GLTFLoader。两个版本的模型因此完全一致。
@@ -162,7 +162,7 @@ web/                     Three.js 实现
 
 ## 发布
 
-推一个 `v*` 标签，release workflow 会自动跑测试、构建单文件、把 `minecube3d-<tag>.html` 挂到 GitHub Release 上。
+推一个 `v*` 标签，release workflow 会自动跑测试、构建单文件、把 `minesweeper3d-<tag>.html` 挂到 GitHub Release 上。
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0

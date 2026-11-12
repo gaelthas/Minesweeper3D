@@ -25,7 +25,7 @@ export default defineConfig({
     modulePreload: false,
     lib: {
       entry: resolvePath('./src/main.js'),
-      name: 'MineCube',
+      name: 'Minesweeper3D',
       formats: ['iife'],
       fileName: () => 'app.js',
       cssFileName: 'app',
