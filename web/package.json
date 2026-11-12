@@ -5,11 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:app": "vite --config vite.config.app.js",
     "build": "vite build",
-    "test": "node --test"
+    "build:app": "vite build --config vite.config.app.js && node scripts/package.mjs",
+    "package": "node scripts/package.mjs",
+    "test": "node --test",
+    "test:e2e": "node scripts/e2e.mjs"
   },
   "dependencies": {
-    "three": "^0.180.0"
+    "three": "^0.180.0",
+    "@discourse-mini-app/sdk": "file:../sdk"
   },
   "devDependencies": {
     "puppeteer-core": "^25.17.0",

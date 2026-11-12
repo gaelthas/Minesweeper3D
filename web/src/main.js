@@ -1,14 +1,13 @@
 import './style.css';
-import { Board, REVEALED, FLAGGED, QUESTION, seededRng } from './logic.js';
-import { World, OPEN_VIEW_PITCH } from './scene.js';
+import { Board, REVEALED, FLAGGED, seededRng } from './logic.js';
+import { World } from './scene.js';
+import { loadCubeGeometry } from './cube-model.js';
 import { Sfx } from './audio.js';
-import { createUi, formatTime } from './ui.js';
+import { createUi } from './ui.js';
+import { connectHost } from '@platform';
+import messages from './strings.json';
 
-const VERSION = __APP_VERSION__;
 const STORE_KEY = 'minecube3d.settings';
-
-const MIN_SIDE = 3;
-const MAX_SIDE = 11;
 const DRAG_THRESHOLD = 4;
 const CHORD_SLOP = 14;
 const ACTIONS = ['none', 'reveal', 'flag', 'chord', 'pan'];
@@ -23,28 +22,43 @@ const defaults = {
   mouseMap: ['reveal', 'pan', 'flag'],
 };
 
-function loadSettings() {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return { ...defaults };
-    const saved = JSON.parse(raw);
-    return {
-      ...defaults,
-      ...saved,
-      mouseMap: Array.isArray(saved.mouseMap) && saved.mouseMap.length === 3
-        ? saved.mouseMap.map((a) => (ACTIONS.includes(a) ? a : 'none'))
-        : [...defaults.mouseMap],
-    };
-  } catch {
-    return { ...defaults };
+/* ---------------- 多语言 ---------------- */
+
+let locale = 'zh_CN';
+
+function t(key, vars = {}) {
+  const table = messages[locale] || messages.zh_CN;
+  const text = table[key] ?? messages.zh_CN[key] ?? key;
+  return text.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ''));
+}
+
+function localize() {
+  for (const el of document.querySelectorAll('[data-text]')) {
+    el.textContent = t(el.dataset.text);
   }
 }
 
-const settings = loadSettings();
-const sfx = new Sfx(settings.volume, settings.muted);
+/* ---------------- 主题 ---------------- */
 
-const canvas = document.getElementById('view');
-const world = new World(canvas);
+function applyTheme(theme, world) {
+  if (!theme) return;
+  const root = document.documentElement;
+  const set = (name, value) => value && root.style.setProperty(name, value);
+  set('--paper', theme.background);
+  set('--sky', theme.background);
+  set('--ink', theme.text);
+  set('--ink-soft', theme.text);
+  set('--line', theme.border);
+  set('--accent', theme.accent);
+  root.style.colorScheme = theme.mode || 'light';
+  if (world) {
+    const hex = String(theme.background || '').replace('#', '');
+    const color = parseInt(hex, 16);
+    if (!Number.isNaN(color) && hex.length === 6) world.renderer.setClearColor(color);
+  }
+}
+
+/* ---------------- 状态 ---------------- */
 
 const state = {
   board: null,
@@ -54,90 +68,58 @@ const state = {
   started: false,
 };
 
-const ui = createUi({
-  onRestart: () => newGame(settings.side, settings.mines),
-  onOpenBoard: () => {
-    sfx.play('ui');
-    pause();
-    ui.openBoard(settings.side, settings.mines);
-  },
-  onOpenOptions: () => {
-    sfx.play('ui');
-    pause();
-    ui.openOptions({ ...settings, version: VERSION });
-  },
-  onApplyBoard: (side, mines) => {
-    sfx.play('ui');
-    settings.side = side;
-    settings.mines = mines;
-    save();
-    newGame(side, mines);
-  },
-  onSpacing: (pct) => {
-    settings.spacing = pct;
-    world.relayout(pct / 100);
-    ui.setSpacing(pct);
-    save();
-  },
-  onOptions: (patch) => {
-    if (patch.volume !== undefined) {
-      settings.volume = patch.volume;
-      sfx.setVolume(patch.volume);
-      ui.syncVolume(patch.volume);
-    }
-    if (patch.muted !== undefined) {
-      settings.muted = patch.muted;
-      sfx.setMuted(patch.muted);
-      ui.syncMute(patch.muted);
-      updateHint();
-    }
-    if (patch.showFps !== undefined) {
-      settings.showFps = patch.showFps;
-      ui.el.showFps.setAttribute('aria-pressed', String(patch.showFps));
-    }
-    if (patch.mapSlot !== undefined) {
-      settings.mouseMap[patch.mapSlot] = patch.mapAction;
-      updateHint();
-    }
-    save();
-  },
-});
+let world = null;
+let sfx = null;
+let settings = { ...defaults };
+let host = null;
+let ui = null;
+
+const canvas = document.getElementById('view');
 
 function save() {
+  if (host) host.save(STORE_KEY, JSON.stringify(settings));
+}
+
+async function loadSettings() {
+  const raw = await host.load(STORE_KEY);
+  if (!raw) return { ...defaults };
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(settings));
+    const saved = JSON.parse(raw);
+    return {
+      ...defaults,
+      ...saved,
+      mouseMap:
+        Array.isArray(saved.mouseMap) && saved.mouseMap.length === 3
+          ? saved.mouseMap.map((a) => (ACTIONS.includes(a) ? a : 'none'))
+          : [...defaults.mouseMap],
+    };
   } catch {
-    /* 隐私模式下写不进去，不影响本局 */
+    return { ...defaults };
   }
 }
 
-/* ---------------- 提示行按当前映射生成 ---------------- */
+/* ---------------- 提示行 ---------------- */
 
-const ACTION_TEXT = {
-  reveal: '揭示',
-  flag: '插旗',
-  chord: '和弦',
-  pan: '平移',
-};
+const ACTION_TEXT = { reveal: 'reveal', flag: 'flag', chord: 'chord', pan: 'pan' };
 
 function updateHint() {
-  const names = ['左键', '中键', '右键'];
+  const names = ['mouseLeft', 'mouseMiddle', 'mouseRight'];
   const parts = [];
-  settings.mouseMap.forEach((a, i) => {
-    if (a === 'none' || !ACTION_TEXT[a]) return;
-    parts.push(`${names[i]} ${ACTION_TEXT[a]}`);
+  settings.mouseMap.forEach((action, i) => {
+    if (!ACTION_TEXT[action]) return;
+    parts.push(`${t(names[i])} ${t(ACTION_TEXT[action])}`);
   });
-  const tail = settings.muted ? '左右键同按和弦 · 滚轮缩放 · R 重开 · M 静音（已静音）' : '左右键同按和弦 · 滚轮缩放 · R 重开 · M 静音';
-  ui.setHint(`${parts.join(' · ')} · ${tail}`);
+  parts.push(t('hintChord'), t('hintWheel'), t('hintRestart'), settings.muted ? t('hintMuteOn') : t('hintMute'));
+  ui.setHint(parts.join(' · '));
 }
 
 /* ---------------- 开局 ---------------- */
 
-// ?seed=123 固定局面，方便复现与自动测试
 const seedParam = new URLSearchParams(location.search).get('seed');
 const rng = seedParam === null ? Math.random : seededRng(Number(seedParam) || 1);
 
 function newGame(side, mines) {
+  if (!world) return;
   state.board = new Board(side, mines, rng);
   state.elapsed = 0;
   state.timing = false;
@@ -150,21 +132,8 @@ function newGame(side, mines) {
   ui.hideResult();
   ui.setTime(0);
   ui.setStats(state.board.mineTotal, 0, 0, state.board.total - state.board.mineTotal);
+  ui.setStatus(t('statusStart'));
   updateHint();
-}
-
-function pause() {
-  if (state.timing) {
-    state.paused = true;
-    state.timing = false;
-  }
-}
-
-function resume() {
-  if (state.paused && state.board && !state.board.gameOver && state.board.generated) {
-    state.paused = false;
-    state.timing = true;
-  }
 }
 
 function anyOverlayOpen() {
@@ -173,16 +142,15 @@ function anyOverlayOpen() {
 
 /* ---------------- 动作 ---------------- */
 
-function hitTarget(px, py) {
-  const hit = world.pick(px, py);
-  if (!hit) return null;
-  return hit;
+function updateStats() {
+  const b = state.board;
+  ui.setStats(b.mineTotal, b.flagCount, b.revealedCount, b.total - b.mineTotal);
 }
 
 function doReveal(px, py) {
   const board = state.board;
   if (board.gameOver) return;
-  const hit = hitTarget(px, py);
+  const hit = world.pick(px, py);
   if (!hit) return;
   const st = board.states[hit.index];
   if (st === REVEALED || st === FLAGGED) return;
@@ -210,30 +178,29 @@ function doReveal(px, py) {
 function doFlag(px, py) {
   const board = state.board;
   if (board.gameOver) return;
-  const hit = hitTarget(px, py);
+  const hit = world.pick(px, py);
   if (!hit) return;
   if (board.states[hit.index] === REVEALED) return;
   const prev = board.states[hit.index];
   board.cycleMark(hit.index);
   world.refresh(hit.index);
   updateStats();
-  if (prev !== FLAGGED && prev !== QUESTION) sfx.play('flag');
-  else sfx.play('ui');
+  sfx.play(board.states[hit.index] === FLAGGED && prev !== FLAGGED ? 'flag' : 'ui');
 }
 
-function doChord(px, py, forcedFace) {
+function doChord(px, py) {
   const board = state.board;
   if (board.gameOver) return;
-  const hit = hitTarget(px, py);
+  const hit = world.pick(px, py);
   if (!hit) return;
-  const face = forcedFace !== undefined ? forcedFace : hit.face;
-  const res = board.chordFace(hit.index, face);
+  const res = board.chordFace(hit.index, hit.face);
   if (!res.opened.length && !res.boom) return;
   world.refreshArea(res.opened);
   updateStats();
-  if (res.boom) finish(false);
-  else {
-    sfx.play('chord' in sfx.buffers ? 'chord' : 'flood');
+  if (res.boom) {
+    finish(false);
+  } else {
+    sfx.play('flood');
     if (board.won) finish(true);
   }
 }
@@ -243,15 +210,13 @@ function finish(won) {
   const board = state.board;
   if (!won) world.markMines();
   ui.setTime(state.elapsed);
-  if (won) sfx.play('win');
-  else sfx.play('boom');
-  ui.showResult(won, state.elapsed, board.side, board.mineTotal);
-  ui.setStats(board.mineTotal, board.flagCount, board.revealedCount, board.total - board.mineTotal);
-}
-
-function updateStats() {
-  const b = state.board;
-  ui.setStats(b.mineTotal, b.flagCount, b.revealedCount, b.total - b.mineTotal);
+  sfx.play(won ? 'win' : 'boom');
+  ui.showResult(won, state.elapsed, board.side, board.mineTotal, {
+    title: won ? t('resultWon') : t('resultLost'),
+    detail: t('resultDetail', { side: board.side, mines: board.mineTotal }),
+  });
+  ui.setStatus(won ? t('statusWon') : t('statusLost'));
+  updateStats();
 }
 
 /* ---------------- 输入 ---------------- */
@@ -268,12 +233,10 @@ const panningHeld = () => [...down].some((b) => settings.mouseMap[b] === 'pan');
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-// 用 mousedown/mouseup 而不是 pointer 事件：右键在部分环境下不派发 pointerdown，
-// 但 mousedown 一定会到。拖动仍然走 pointermove。
 canvas.addEventListener('mousedown', (e) => {
-  if (anyOverlayOpen()) return;
+  if (anyOverlayOpen() || !state.board) return;
   sfx.unlock();
-  const slot = e.button; // 0 左 / 1 中 / 2 右
+  const slot = e.button;
   if (slot > 2) return;
 
   if (down.size === 0) {
@@ -311,11 +274,10 @@ window.addEventListener('mousemove', (e) => {
 
 window.addEventListener('mouseup', (e) => {
   const slot = e.button;
-  if (slot > 2) return;
-  if (!down.has(slot)) return;
+  if (slot > 2 || !down.has(slot)) return;
   down.delete(slot);
 
-  if (!anyOverlayOpen() && !actionDone && !dragging) {
+  if (!anyOverlayOpen() && !actionDone && !dragging && state.board) {
     const action = settings.mouseMap[slot];
     if (action !== 'none' && action !== 'pan') {
       if (chordArmed || action === 'chord') {
@@ -371,16 +333,21 @@ function closeTopOverlay() {
   }
   if (ui.isOptionsOpen()) {
     ui.closeOptions();
-    resume();
     return;
   }
-  if (ui.isBoardOpen()) {
-    ui.closeBoard();
-    resume();
-  }
+  if (ui.isBoardOpen()) ui.closeBoard();
 }
 
-window.addEventListener('resize', () => world.resize());
+window.addEventListener('resize', () => {
+  if (world) world.resize();
+});
+
+function pause() {
+  if (state.timing) {
+    state.paused = true;
+    state.timing = false;
+  }
+}
 
 /* ---------------- 循环 ---------------- */
 
@@ -405,20 +372,93 @@ function loop(now) {
       fpsAcc = 0;
       fpsFrames = 0;
     }
-  } else if (ui.el.fps.textContent) {
+  } else if (ui && ui.el.fps.textContent) {
     ui.setFps(-1);
   }
 
-  world.render();
+  if (world) world.render();
   requestAnimationFrame(loop);
 }
 
-world.resize();
-newGame(settings.side, settings.mines);
-ui.setSpacing(settings.spacing);
-ui.syncVolume(settings.volume);
-ui.syncMute(settings.muted);
-requestAnimationFrame(loop);
+/* ---------------- 启动 ---------------- */
 
-// 供控制台调试
-window.minecube = { world, state, settings, ui };
+async function boot() {
+  host = await connectHost();
+  locale = host.locale || locale;
+  const theme = await host.applyTheme();
+  localize();
+
+  settings = await loadSettings();
+  sfx = new Sfx(settings.volume, settings.muted);
+
+  ui = createUi({
+    onRestart: () => newGame(settings.side, settings.mines),
+    onOpenBoard: () => {
+      sfx.play('ui');
+      pause();
+      ui.openBoard(settings.side, settings.mines);
+    },
+    onOpenOptions: () => {
+      sfx.play('ui');
+      pause();
+      ui.openOptions({ ...settings, version: __APP_VERSION__ });
+    },
+    onApplyBoard: (side, mines) => {
+      sfx.play('ui');
+      settings.side = side;
+      settings.mines = mines;
+      save();
+      newGame(side, mines);
+    },
+    onSpacing: (pct) => {
+      settings.spacing = pct;
+      world.relayout(pct / 100);
+      ui.setSpacing(pct);
+      save();
+    },
+    onOptions: (patch) => {
+      if (patch.volume !== undefined) {
+        settings.volume = patch.volume;
+        sfx.setVolume(patch.volume);
+        ui.syncVolume(patch.volume);
+      }
+      if (patch.muted !== undefined) {
+        settings.muted = patch.muted;
+        sfx.setMuted(patch.muted);
+        ui.syncMute(patch.muted);
+        updateHint();
+      }
+      if (patch.showFps !== undefined) {
+        settings.showFps = patch.showFps;
+        ui.el.showFps.setAttribute('aria-pressed', String(patch.showFps));
+      }
+      if (patch.mapSlot !== undefined) {
+        settings.mouseMap[patch.mapSlot] = patch.mapAction;
+        updateHint();
+      }
+      save();
+    },
+  }, t);
+
+  const cubeGeometry = await loadCubeGeometry();
+  world = new World(canvas, cubeGeometry);
+  applyTheme(theme, world);
+  host.onThemeChange((next) => applyTheme(next, world));
+
+  world.resize();
+  newGame(settings.side, settings.mines);
+  ui.setSpacing(settings.spacing);
+  ui.syncVolume(settings.volume);
+  ui.syncMute(settings.muted);
+
+  window.minecube = { world, state, settings, ui };
+
+  await host.ready();
+  requestAnimationFrame(loop);
+}
+
+boot().catch((error) => {
+  console.error('启动失败', error);
+  const hint = document.getElementById('hint');
+  if (hint) hint.textContent = String(error && error.message);
+});

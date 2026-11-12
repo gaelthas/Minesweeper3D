@@ -23,6 +23,9 @@ jobs:
         run: npm test
       - name: 构建单文件
         run: npm run build
+      - name: 打包成微应用（验证 manifest 与资源声明）
+        run: npm run build:app
+
       - name: 入库产物是否与源码同步
         run: |
           if ! git -C "$GITHUB_WORKSPACE" diff --quiet -- web/dist/index.html; then

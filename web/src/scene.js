@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { makeNumberTexture, makeFlagTexture, makeQuestionTexture } from './geometry.js';
-import { loadCubeGeometry } from './cube-model.js';
 import { Board, HIDDEN, REVEALED, FLAGGED, QUESTION } from './logic.js';
 
 // 立方体边长与收缩比例，和 Godot 版保持一致
@@ -41,7 +40,7 @@ export function faceFromNormal(n) {
 }
 
 export class World {
-  constructor(canvas) {
+  constructor(canvas, cubeGeometry) {
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -64,7 +63,7 @@ export class World {
     fill.position.set(8, -4, -9);
     this.scene.add(fill);
 
-    this.cubeGeo = loadCubeGeometry();
+    this.cubeGeo = cubeGeometry;
     this.faceGeo = new THREE.PlaneGeometry(1, 1);
 
     this.materials = {

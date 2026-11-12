@@ -49,7 +49,7 @@ Web 版 · v0.1.0 · Godot 版 · v0.5.0
 cd web
 npm install
 npm run dev      # 开发，带热更新
-npm run build    # 产出 dist/index.html
+npm run build    # 产出 dist/index.html（单文件）
 ```
 
 构建产物 `web/dist/index.html` 已入库，也可以直接下载 [Releases](https://github.com/gaelthas/Minesweeper3D/releases) 里的附件。
@@ -58,6 +58,42 @@ npm run build    # 产出 dist/index.html
 
 方块模型不用代码现搓：Web 版直接内联 Godot 版那份 Blender 产物（`assets/cube_rounded.glb`），
 运行时用一个 40 行的 GLB 读取器取出顶点，不引 GLTFLoader。两个版本的模型因此完全一致。
+
+## 微应用版（Discourse mapp）
+
+同一份源码也能打成 [Discourse 微应用](https://github.com/linux-do/mapp-developer-guide) 要求的包。平台不是加载一个 HTML，而是把正文片段、脚本、样式分开注入，能力通过 SDK 提供。
+
+```sh
+cd web
+MINI_APP_ID=<平台分配的应用 ID> MINI_APP_VERSION=1.0.0 npm run build:app
+# 产物：build/package/app.zip
+```
+
+ZIP 里就是规范要求的五个基础文件加声明的资源：
+
+```
+manifest.json
+index.html            正文片段，不含脚本/样式标签
+app.js                IIFE
+app.css
+strings.json          zh_CN / en
+assets/sfx/*.mp3      六个 CC0 音效
+assets/models/cube.glb
+```
+
+两份产物共用一套源码，靠 `vite.config.js` / `vite.config.app.js` 里的 alias 切换实现：
+
+| | 单文件版 | 微应用版 |
+| --- | --- | --- |
+| 资源 | `?url` 内联成 data URI | `sdk.assets.readBytes('assets/…')` |
+| 设置存储 | 浏览器 `localStorage` | `sdk.localStorage`（需 `storage.read/write`） |
+| 主题 | 固定浅色 | `sdk.theme`（需 `theme.read`），跟随社区深浅色 |
+| 音效 | 内联字节直接解码 | 同上，需 `audio.webAudio` 权限 |
+| 生命周期 | 无 | 首屏后调 `sdk.lifecycle.ready()` |
+
+权限只申请实际用到的四项：`theme.read`、`storage.read`、`storage.write`、`audio.webAudio`。任一能力缺失都只降级，游戏照常可玩。
+
+`sdk/` 是官方指南仓库的 SDK 副本（未发布到 npm，只能 `file:` 引用）。追踪上游更新时整体替换这个目录即可。
 
 ## Godot 版
 

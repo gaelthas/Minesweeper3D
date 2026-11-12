@@ -1,12 +1,7 @@
 const $ = (id) => document.getElementById(id);
 
-export const ACTION_LABELS = [
-  ['none', '无'],
-  ['reveal', '揭示'],
-  ['flag', '插旗'],
-  ['chord', '和弦'],
-  ['pan', '平移'],
-];
+// 取值顺序与 logic / main 里的动作名一致
+export const ACTION_KEYS = ['none', 'reveal', 'flag', 'chord', 'pan'];
 
 export function formatTime(sec) {
   const t = Math.max(0, Math.floor(sec));
@@ -15,12 +10,13 @@ export function formatTime(sec) {
   return `${m}:${s}`;
 }
 
-export function createUi(handlers) {
+export function createUi(handlers, t) {
   const el = {
     stats: $('stats'),
     time: $('time'),
     fps: $('fps'),
     hint: $('hint'),
+    status: $('status'),
     spacing: $('spacing'),
     spacingValue: $('spacing-value'),
     boardPanel: $('board-panel'),
@@ -46,10 +42,10 @@ export function createUi(handlers) {
 
   // 鼠标映射下拉
   for (const sel of [el.mapLeft, el.mapMiddle, el.mapRight]) {
-    for (const [value, label] of ACTION_LABELS) {
+    for (const key of ACTION_KEYS) {
       const opt = document.createElement('option');
-      opt.value = value;
-      opt.textContent = label;
+      opt.value = key;
+      opt.textContent = t(key);
       sel.append(opt);
     }
   }
@@ -110,7 +106,7 @@ export function createUi(handlers) {
     const rec = Math.max(1, Math.min(Math.round(total * 0.3), total - 1));
     el.sideValue.value = String(side);
     el.minesValue.value = String(mines);
-    el.boardHint.textContent = `${side} × ${side} × ${side} · 共 ${total} 格 · 密度 ${density}% · 推荐 ${rec} 颗`;
+    el.boardHint.textContent = t('boardHint', { side, total, density, rec });
   }
 
   function closeBoard() {
@@ -126,7 +122,7 @@ export function createUi(handlers) {
   return {
     el,
     setStats(mines, flags, opened, need) {
-      el.stats.textContent = `雷 ${mines}　旗 ${flags}　已开 ${opened}/${need}`;
+      el.stats.textContent = t('stats', { mines, flags, opened, need });
     },
     setTime(sec) {
       el.time.textContent = formatTime(sec);
@@ -140,6 +136,9 @@ export function createUi(handlers) {
     },
     setHint(text) {
       el.hint.textContent = text;
+    },
+    setStatus(text) {
+      if (el.status) el.status.textContent = text;
     },
     setSpacing(pct) {
       el.spacing.value = String(pct);
@@ -161,7 +160,7 @@ export function createUi(handlers) {
       el.mapLeft.value = s.mouseMap[0];
       el.mapMiddle.value = s.mouseMap[1];
       el.mapRight.value = s.mouseMap[2];
-      el.version.textContent = `MineCube 3D  v${s.version}`;
+      el.version.textContent = t('version', { version: s.version });
       el.optionsPanel.hidden = false;
     },
     syncVolume(v) {
@@ -171,12 +170,12 @@ export function createUi(handlers) {
     syncMute(m) {
       el.mute.setAttribute('aria-pressed', String(m));
     },
-    showResult(won, sec, side, mines) {
+    showResult(won, sec, side, mines, copy = {}) {
       el.result.classList.toggle('won', won);
       el.result.classList.toggle('lost', !won);
-      el.resultTitle.textContent = won ? '清空' : '踩雷了';
+      el.resultTitle.textContent = copy.title ?? t(won ? 'resultWon' : 'resultLost');
       el.resultTime.textContent = formatTime(sec);
-      el.resultDetail.textContent = `${side} × ${side} × ${side} · ${mines} 颗雷`;
+      el.resultDetail.textContent = copy.detail ?? t('resultDetail', { side, mines });
       el.result.hidden = false;
     },
 

@@ -1,13 +1,30 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import pkg from './package.json' with { type: 'json' };
 
-// 产物是单个 index.html：JS、CSS、音效全部内联，双击即可玩
+const resolvePath = (path) => fileURLToPath(new URL(path, import.meta.url));
+
+// 单文件构建：所有资源内联，产物是一个可以双击打开的 HTML。
+// mapp 构建见 vite.config.app.js。
 export default defineConfig({
-  plugins: [viteSingleFile()],
-  // .glb 当成静态资源处理，?url 导入会在 assetsInlineLimit 内自动内联成 data URL
+  plugins: [
+    {
+      name: 'inline-template',
+      transformIndexHtml(html) {
+        return html.replace('<!--app-->', readFileSync(resolvePath('./src/template.html'), 'utf8'));
+      },
+    },
+    viteSingleFile(),
+  ],
+  resolve: {
+    alias: {
+      '@assets': resolvePath('./src/assets-inline.js'),
+      '@platform': resolvePath('./src/platform-web.js'),
+    },
+  },
   assetsInclude: ['**/*.glb'],
-  // 版本号只在 package.json 里改一次
   define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   build: {
     target: 'es2020',

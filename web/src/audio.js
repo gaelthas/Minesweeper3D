@@ -1,20 +1,15 @@
-// 音效：六段 CC0 素材以 base64 内联，单文件里也能出声。
+// 音效：六段 CC0 素材。单文件构建内联，mapp 构建从包内读。
 // 浏览器要求用户手势后才能播放，所以解码和 AudioContext 的启动都推迟到第一次交互。
 
-import revealUrl from '../../prototypes/minecube/assets/sfx/reveal.mp3?inline';
-import floodUrl from '../../prototypes/minecube/assets/sfx/flood.mp3?inline';
-import flagUrl from '../../prototypes/minecube/assets/sfx/flag.mp3?inline';
-import uiUrl from '../../prototypes/minecube/assets/sfx/ui_click.mp3?inline';
-import boomUrl from '../../prototypes/minecube/assets/sfx/boom.mp3?inline';
-import winUrl from '../../prototypes/minecube/assets/sfx/win.mp3?inline';
+import { loadAsset } from '@assets';
 
 const SOURCES = {
-  reveal: revealUrl,
-  flood: floodUrl,
-  flag: flagUrl,
-  ui: uiUrl,
-  boom: boomUrl,
-  win: winUrl,
+  reveal: 'sfx/reveal.mp3',
+  flood: 'sfx/flood.mp3',
+  flag: 'sfx/flag.mp3',
+  ui: 'sfx/ui_click.mp3',
+  boom: 'sfx/boom.mp3',
+  win: 'sfx/win.mp3',
 };
 
 export class Sfx {
@@ -60,11 +55,11 @@ export class Sfx {
     this._decoding = (async () => {
       const entries = Object.entries(SOURCES);
       await Promise.all(
-        entries.map(async ([name, url]) => {
+        entries.map(async ([name, path]) => {
           try {
-            const res = await fetch(url);
-            const data = await res.arrayBuffer();
-            this.buffers[name] = await this.ctx.decodeAudioData(data);
+            const bytes = await loadAsset(path);
+            // decodeAudioData 会接管 ArrayBuffer，传副本避免共用同一块内存
+            this.buffers[name] = await this.ctx.decodeAudioData(bytes.buffer.slice(0));
           } catch {
             // 单个音效解码失败不该拖垮整局
           }
