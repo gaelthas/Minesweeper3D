@@ -6,6 +6,8 @@
 
 Web 版 · v0.1.0 · Godot 版 · v0.5.0
 
+在线试玩：[gaelthas.github.io/gaelthas/minecube](https://gaelthas.github.io/gaelthas/minecube/)
+
 ## 它和 2D 扫雷的差别
 
 难点在数字的意义。三维里一颗格子有 26 个邻格，把 26 个邻格的雷数压成一个数字，剥离一层之后就无法继续推理——数字既不是"这一层的信息"，也不是"某一面的信息"。
