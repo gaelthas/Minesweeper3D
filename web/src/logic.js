@@ -30,6 +30,20 @@ for (let z = -1; z <= 1; z++) {
   }
 }
 
+/** 紧凑间距的可见面：正方向轴邻格越界或已揭示，不考虑相机和剥层。 */
+export function closedFaceMask(board, i) {
+  const center = board.coord(i);
+  let mask = 0;
+  for (let face = 0; face < 6; face++) {
+    const c = [...center];
+    c[FACE_AXIS[face]] += face % 2 === 0 ? 1 : -1;
+    if (!board.inBounds(...c) || board.states[board.index(...c)] === REVEALED) {
+      mask |= 1 << face;
+    }
+  }
+  return mask;
+}
+
 /** 确定性随机数，测试用；默认走 Math.random */
 export function seededRng(seed) {
   let s = seed >>> 0;
@@ -111,6 +125,11 @@ export class Board {
     return out;
   }
 
+  /** 和弦、高亮与展开共用面所在平面的邻域 */
+  relatedCells(i, face) {
+    return this.faceNeighbors(i, face);
+  }
+
   faceCountsOf(i) {
     const out = [];
     for (let f = 0; f < 6; f++) out.push(this.faceCounts[i * 6 + f]);
@@ -154,7 +173,7 @@ export class Board {
           continue;
         }
         let c = 0;
-        for (const n of this.faceNeighbors(i, f)) c += this.mines[n];
+        for (const n of this.relatedCells(i, f)) c += this.mines[n];
         this.faceCounts[i * 6 + f] = c;
       }
     }
@@ -184,10 +203,10 @@ export class Board {
       this.revealedCount++;
       opened.push(cur);
 
-      // 某一面为 0，说明该平面内 8 格必无雷，整片打开
+      // 每面为 0 时展开该面的关联格，可继续连锁
       for (let f = 0; f < 6; f++) {
         if (this.faceCounts[cur * 6 + f] !== 0) continue;
-        for (const n of this.faceNeighbors(cur, f)) {
+        for (const n of this.relatedCells(cur, f)) {
           if (this.states[n] === HIDDEN || this.states[n] === QUESTION) stack.push(n);
         }
       }
@@ -218,7 +237,7 @@ export class Board {
     }
   }
 
-  /** 和弦按平面判定：点哪一面，就只在这一面所属的平面里比旗数 */
+  /** 和弦按被点面的平面邻域比旗数 */
   chordFace(i, face) {
     const opened = [];
     if (this.gameOver || !this.generated) return { opened, boom: false };
@@ -228,7 +247,7 @@ export class Board {
     const need = this.faceCounts[i * 6 + face];
     if (need === 0) return { opened, boom: false };
 
-    const ring = this.faceNeighbors(i, face);
+    const ring = this.relatedCells(i, face);
     let flagged = 0;
     const targets = [];
     for (const n of ring) {

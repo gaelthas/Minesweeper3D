@@ -16,6 +16,7 @@
     "mute": "静音",
     "fpsLabel": "帧率",
     "fpsButton": "显示帧率",
+    "dimOthersOnChord": "和弦时淡化其他",
     "mouseLeft": "左键",
     "mouseMiddle": "中键",
     "mouseRight": "右键",
@@ -39,7 +40,20 @@
     "resultDetail": "{side} × {side} × {side} · {mines} 颗雷",
     "stats": "雷 {mines}　旗 {flags}　已开 {opened}/{need}",
     "boardHint": "{side} × {side} × {side} · 共 {total} 格 · 密度 {density}% · 推荐 {rec} 颗",
-    "version": "Minesweeper3D  v{version}"
+    "version": "Minesweeper3D  v{version}",
+    "peelShow": "显示一层",
+    "peelHide": "隐藏一层",
+    "peelDepth": "第 {depth}/{max} 层",
+    "hintPeel": "H 隐藏一层 / Shift+H 显示一层",
+    "appTitle": "三维扫雷 · Minesweeper3D",
+    "language": "语言 / Language",
+    "languageAuto": "自动（跟随浏览器/宿主）",
+    "languageChinese": "简体中文",
+    "languageEnglish": "English",
+    "fpsValue": "{fps} FPS",
+    "boardCanvas": "三维扫雷棋盘",
+    "elapsedTime": "用时",
+    "startupFailed": "启动失败，请刷新后重试。"
   },
   "en": {
     "restart": "Restart",
@@ -58,6 +72,7 @@
     "mute": "Mute",
     "fpsLabel": "FPS",
     "fpsButton": "Show FPS",
+    "dimOthersOnChord": "Dim other cells while chording",
     "mouseLeft": "Left",
     "mouseMiddle": "Middle",
     "mouseRight": "Right",
@@ -81,6 +96,19 @@
     "resultDetail": "{side} × {side} × {side} · {mines} mines",
     "stats": "Mines {mines}　Flags {flags}　Open {opened}/{need}",
     "boardHint": "{side} × {side} × {side} · {total} cells · {density}% · suggest {rec}",
-    "version": "Minesweeper3D  v{version}"
+    "version": "Minesweeper3D  v{version}",
+    "peelShow": "Show layer",
+    "peelHide": "Hide layer",
+    "peelDepth": "Layer {depth}/{max}",
+    "hintPeel": "H hide layer / Shift+H show layer",
+    "appTitle": "Minesweeper3D",
+    "language": "语言 / Language",
+    "languageAuto": "Auto (browser/host)",
+    "languageChinese": "简体中文",
+    "languageEnglish": "English",
+    "fpsValue": "{fps} FPS",
+    "boardCanvas": "3D Minesweeper board",
+    "elapsedTime": "Elapsed time",
+    "startupFailed": "Unable to start. Please refresh and try again."
   }
 }

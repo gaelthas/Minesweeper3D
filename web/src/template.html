@@ -1,4 +1,4 @@
-<canvas id="view"></canvas>
+<canvas id="view" data-aria-label="boardCanvas"></canvas>
 
 <header id="hud">
   <div class="left">
@@ -6,7 +6,7 @@
     <span id="fps"></span>
   </div>
   <div class="right">
-    <span id="time">00:00</span>
+    <span id="time" data-aria-label="elapsedTime">00:00</span>
     <button id="btn-restart" type="button" data-text="restart"></button>
     <button id="btn-board" type="button" data-text="board"></button>
     <button id="btn-options" type="button" data-text="options"></button>
@@ -17,10 +17,17 @@
 
 <footer id="foot">
   <p id="hint"></p>
-  <div class="spacing">
-    <label for="spacing" data-text="spacing"></label>
-    <input id="spacing" type="range" min="100" max="200" step="1" value="100" aria-label="spacing" />
-    <span id="spacing-value">100%</span>
+  <div class="view-controls">
+    <div class="peel">
+      <button id="peel-show" type="button" data-text="peelShow"></button>
+      <span id="peel-value" aria-live="polite"></span>
+      <button id="peel-hide" type="button" data-text="peelHide"></button>
+    </div>
+    <div class="spacing">
+      <label for="spacing" data-text="spacing"></label>
+      <input id="spacing" type="range" min="100" max="200" step="1" value="100" data-aria-label="spacing" />
+      <span id="spacing-value">100%</span>
+    </div>
   </div>
 </footer>
 
@@ -53,6 +60,15 @@
     <h2 data-text="optionsTitle"></h2>
     <p class="sub" data-text="optionsSub"></p>
 
+    <div class="row language-row">
+      <label for="lang" data-text="language"></label>
+      <select id="lang">
+        <option value="auto" data-text="languageAuto"></option>
+        <option value="zh_CN" data-text="languageChinese"></option>
+        <option value="en" data-text="languageEnglish"></option>
+      </select>
+    </div>
+
     <div class="row">
       <label for="volume" data-text="volume"></label>
       <input id="volume" type="range" min="0" max="100" step="1" value="70" />
@@ -65,6 +81,10 @@
     <div class="row">
       <label data-text="fpsLabel"></label>
       <button id="show-fps" type="button" class="toggle" data-text="fpsButton"></button>
+    </div>
+
+    <div class="row">
+      <button id="dim-others-on-chord" type="button" class="toggle" data-text="dimOthersOnChord" aria-pressed="true"></button>
     </div>
 
     <div class="row">
