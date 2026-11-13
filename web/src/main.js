@@ -6,6 +6,7 @@ import { Sfx } from './audio.js';
 import { createUi } from './ui.js';
 import { connectHost } from '@platform';
 import messages from './strings.json';
+import { languagePreference, normalizeLocale, urlLanguage, resolveLocale, translate } from './i18n.js';
 
 const STORE_KEY = 'minesweeper3d.settings';
 const DRAG_THRESHOLD = 4;
@@ -13,29 +14,47 @@ const CHORD_SLOP = 14;
 const ACTIONS = ['none', 'reveal', 'flag', 'chord', 'pan'];
 
 const defaults = {
+  lang: 'auto',
   side: 5,
   mines: 38,
   volume: 70,
   muted: false,
   showFps: false,
+  dimOthersOnChord: true,
   spacing: 100,
   mouseMap: ['reveal', 'pan', 'flag'],
 };
 
 /* ---------------- 多语言 ---------------- */
 
-let locale = 'zh_CN';
+let locale = normalizeLocale(navigator.language);
+let langOverride = urlLanguage(location.search);
 
 function t(key, vars = {}) {
-  const table = messages[locale] || messages.zh_CN;
-  const text = table[key] ?? messages.zh_CN[key] ?? key;
-  return text.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ''));
+  return translate(messages, locale, key, vars);
 }
 
-function localize() {
+/** 只刷新文案，不改棋盘、计时、相机或浮层开关。启动和切换共用。 */
+function refreshLanguage() {
+  locale = resolveLocale(settings.lang, host?.connected ? host.locale : navigator.language, langOverride);
+  document.documentElement.lang = locale === 'zh_CN' ? 'zh-CN' : 'en';
+  document.title = t('appTitle');
   for (const el of document.querySelectorAll('[data-text]')) {
     el.textContent = t(el.dataset.text);
   }
+  for (const [attribute, key] of [['aria-label', 'ariaLabel'], ['title', 'title']]) {
+    for (const el of document.querySelectorAll(`[data-${attribute}]`)) {
+      el.setAttribute(attribute, t(el.dataset[key]));
+    }
+  }
+  if (!ui) return;
+  ui.refreshText({ lang: langOverride || settings.lang, version: __APP_VERSION__ });
+  if (state.board) {
+    updateStats();
+    ui.setStatus(t(state.board.gameOver ? (state.board.won ? 'statusWon' : 'statusLost') : 'statusStart'));
+    ui.setPeel(world.peel, Math.floor((state.board.side - 1) / 2));
+  }
+  updateHint();
 }
 
 /* ---------------- 主题 ---------------- */
@@ -85,9 +104,12 @@ async function loadSettings() {
   if (!raw) return { ...defaults };
   try {
     const saved = JSON.parse(raw);
+    delete saved.rule; // 忽略旧存档的规则选择，不再写回设置
     return {
       ...defaults,
       ...saved,
+      lang: languagePreference(saved.lang),
+      dimOthersOnChord: saved.dimOthersOnChord !== false,
       mouseMap:
         Array.isArray(saved.mouseMap) && saved.mouseMap.length === 3
           ? saved.mouseMap.map((a) => (ACTIONS.includes(a) ? a : 'none'))
@@ -109,7 +131,7 @@ function updateHint() {
     if (!ACTION_TEXT[action]) return;
     parts.push(`${t(names[i])} ${t(ACTION_TEXT[action])}`);
   });
-  parts.push(t('hintChord'), t('hintWheel'), t('hintRestart'), settings.muted ? t('hintMuteOn') : t('hintMute'));
+  parts.push(t('hintPeel'), t('hintChord'), t('hintWheel'), t('hintRestart'), settings.muted ? t('hintMuteOn') : t('hintMute'));
   ui.setHint(parts.join(' · '));
 }
 
@@ -120,6 +142,7 @@ const rng = seedParam === null ? Math.random : seededRng(Number(seedParam) || 1)
 
 function newGame(side, mines) {
   if (!world) return;
+  cancelGesture();
   state.board = new Board(side, mines, rng);
   state.elapsed = 0;
   state.timing = false;
@@ -129,9 +152,10 @@ function newGame(side, mines) {
   world.frame(side);
   world.build(state.board, settings.spacing / 100);
   world.applyCamera();
+  ui.setPeel(0, Math.floor((side - 1) / 2));
   ui.hideResult();
   ui.setTime(0);
-  ui.setStats(state.board.mineTotal, 0, 0, state.board.total - state.board.mineTotal);
+  updateStats();
   ui.setStatus(t('statusStart'));
   updateHint();
 }
@@ -206,15 +230,13 @@ function doChord(px, py) {
 }
 
 function finish(won) {
+  cancelGesture();
   state.timing = false;
   const board = state.board;
   if (!won) world.markMines();
   ui.setTime(state.elapsed);
   sfx.play(won ? 'win' : 'boom');
-  ui.showResult(won, state.elapsed, board.side, board.mineTotal, {
-    title: won ? t('resultWon') : t('resultLost'),
-    detail: t('resultDetail', { side: board.side, mines: board.mineTotal }),
-  });
+  ui.showResult(won, state.elapsed, board.side, board.mineTotal);
   ui.setStatus(won ? t('statusWon') : t('statusLost'));
   updateStats();
 }
@@ -230,6 +252,42 @@ let lastPointer = { x: 0, y: 0 };
 
 const isClickAction = (action) => action === 'reveal' || action === 'flag' || action === 'chord';
 const panningHeld = () => [...down].some((b) => settings.mouseMap[b] === 'pan');
+
+const chordHeld = () => chordArmed || [...down].some((b) => settings.mouseMap[b] === 'chord');
+
+function cancelGesture() {
+  down.clear();
+  chordArmed = false;
+  dragging = false;
+  actionDone = false;
+  if (world) world.clearHighlight();
+}
+
+function updateHighlight() {
+  if (!world || !state.board) return;
+  if (!chordHeld() || dragging || actionDone || state.board.gameOver || anyOverlayOpen()) {
+    world.clearHighlight();
+    return;
+  }
+  const hit = world.pick(lastPointer.x, lastPointer.y);
+  world.setHighlight(hit ? state.board.relatedCells(hit.index, hit.face) : [], hit ? hit.index : -1, settings.dimOthersOnChord);
+}
+
+function changePeel(delta) {
+  if (!world || !state.board || anyOverlayOpen()) return;
+  world.setPeel(world.peel + delta);
+  ui.setPeel(world.peel, Math.floor((state.board.side - 1) / 2));
+  updateHighlight();
+}
+
+canvas.addEventListener('mouseleave', () => {
+  if (world) world.clearHighlight();
+});
+canvas.addEventListener('pointercancel', cancelGesture);
+window.addEventListener('blur', cancelGesture);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) cancelGesture();
+});
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -252,6 +310,7 @@ canvas.addEventListener('mousedown', (e) => {
     chordArmed = true;
     if (Math.hypot(e.clientX - pressPos.x, e.clientY - pressPos.y) <= CHORD_SLOP) dragging = false;
   }
+  updateHighlight();
 });
 
 window.addEventListener('mousemove', (e) => {
@@ -260,12 +319,16 @@ window.addEventListener('mousemove', (e) => {
   const dy = e.clientY - lastPointer.y;
   lastPointer = { x: e.clientX, y: e.clientY };
 
-  // 和弦手势期间不转相机，否则手一抖和弦就没了
-  if (chordArmed) return;
+  // 双键和弦期间不转相机，否则手一抖和弦就没了
+  if (chordArmed) {
+    updateHighlight();
+    return;
+  }
 
   if (!dragging && Math.hypot(e.clientX - pressPos.x, e.clientY - pressPos.y) > DRAG_THRESHOLD) {
     dragging = true;
   }
+  updateHighlight();
   if (!dragging) return;
 
   if (panningHeld()) world.pan(dx, dy);
@@ -276,6 +339,7 @@ window.addEventListener('mouseup', (e) => {
   const slot = e.button;
   if (slot > 2 || !down.has(slot)) return;
   down.delete(slot);
+  world.clearHighlight();
 
   if (!anyOverlayOpen() && !actionDone && !dragging && state.board) {
     const action = settings.mouseMap[slot];
@@ -306,18 +370,23 @@ canvas.addEventListener(
     if (anyOverlayOpen()) return;
     e.preventDefault();
     world.zoom(e.deltaY > 0 ? 0.55 : -0.55);
+    updateHighlight();
   },
   { passive: false }
 );
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    cancelGesture();
     closeTopOverlay();
     return;
   }
   if (anyOverlayOpen()) return;
   if (e.key === 'r' || e.key === 'R') newGame(settings.side, settings.mines);
-  else if (e.key === 'm' || e.key === 'M') {
+  else if (e.key === 'h' || e.key === 'H') {
+    e.preventDefault();
+    changePeel(e.shiftKey ? -1 : 1);
+  } else if (e.key === 'm' || e.key === 'M') {
     settings.muted = !settings.muted;
     sfx.setMuted(settings.muted);
     ui.syncMute(settings.muted);
@@ -338,11 +407,14 @@ function closeTopOverlay() {
   if (ui.isBoardOpen()) ui.closeBoard();
 }
 
+window.addEventListener('languagechange', refreshLanguage);
+
 window.addEventListener('resize', () => {
   if (world) world.resize();
 });
 
 function pause() {
+  cancelGesture();
   if (state.timing) {
     state.paused = true;
     state.timing = false;
@@ -384,11 +456,10 @@ function loop(now) {
 
 async function boot() {
   host = await connectHost();
-  locale = host.locale || locale;
   const theme = await host.applyTheme();
-  localize();
 
   settings = await loadSettings();
+  save(); // 持久化清理后的设置
   sfx = new Sfx(settings.volume, settings.muted);
 
   ui = createUi({
@@ -401,7 +472,7 @@ async function boot() {
     onOpenOptions: () => {
       sfx.play('ui');
       pause();
-      ui.openOptions({ ...settings, version: __APP_VERSION__ });
+      ui.openOptions({ ...settings, lang: langOverride || settings.lang, version: __APP_VERSION__ });
     },
     onApplyBoard: (side, mines) => {
       sfx.play('ui');
@@ -410,6 +481,7 @@ async function boot() {
       save();
       newGame(side, mines);
     },
+    onPeel: changePeel,
     onSpacing: (pct) => {
       settings.spacing = pct;
       world.relayout(pct / 100);
@@ -417,6 +489,11 @@ async function boot() {
       save();
     },
     onOptions: (patch) => {
+      if (patch.lang !== undefined) {
+        settings.lang = languagePreference(patch.lang);
+        langOverride = null; // 用户主动选择优先；URL 覆盖本身从不写进存档
+        refreshLanguage();
+      }
       if (patch.volume !== undefined) {
         settings.volume = patch.volume;
         sfx.setVolume(patch.volume);
@@ -427,6 +504,11 @@ async function boot() {
         sfx.setMuted(patch.muted);
         ui.syncMute(patch.muted);
         updateHint();
+      }
+      if (patch.dimOthersOnChord !== undefined) {
+        settings.dimOthersOnChord = patch.dimOthersOnChord;
+        ui.el.dimOthersOnChord.setAttribute('aria-pressed', String(patch.dimOthersOnChord));
+        updateHighlight();
       }
       if (patch.showFps !== undefined) {
         settings.showFps = patch.showFps;
@@ -439,6 +521,7 @@ async function boot() {
       save();
     },
   }, t);
+  refreshLanguage();
 
   const [cubeGeometry, mineParts] = await Promise.all([
     loadCubeGeometry(),
@@ -446,13 +529,17 @@ async function boot() {
   ]);
   world = new World(canvas, cubeGeometry, mineParts);
   applyTheme(theme, world);
-  host.onThemeChange((next) => applyTheme(next, world));
+  host.onThemeChange((next) => {
+    applyTheme(next, world);
+    refreshLanguage();
+  });
 
   world.resize();
   newGame(settings.side, settings.mines);
   ui.setSpacing(settings.spacing);
   ui.syncVolume(settings.volume);
   ui.syncMute(settings.muted);
+  refreshLanguage();
 
   window.minesweeper3d = { world, state, settings, ui };
 
@@ -463,5 +550,5 @@ async function boot() {
 boot().catch((error) => {
   console.error('启动失败', error);
   const hint = document.getElementById('hint');
-  if (hint) hint.textContent = String(error && error.message);
+  if (hint) hint.textContent = t('startupFailed');
 });

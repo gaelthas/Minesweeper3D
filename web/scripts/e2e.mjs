@@ -28,6 +28,8 @@ if (!existsSync(target)) {
   process.exit(1);
 }
 
+const messages = JSON.parse(readFileSync(new URL('../src/strings.json', import.meta.url), 'utf8'));
+
 let failures = 0;
 const check = (ok, msg) => {
   console.log(`${ok ? '  ok  ' : '  x  '}${msg}`);
@@ -52,6 +54,8 @@ try {
   await page.goto(`${pathToFileURL(target).href}?seed=20261112`);
   await page.waitForFunction(() => window.minesweeper3d && window.minesweeper3d.state.board, { timeout: 15000 });
   await new Promise((r) => setTimeout(r, 600));
+
+  const currentStrings = async (tab = page) => messages[await tab.$eval('html', (el) => el.lang === 'zh-CN' ? 'zh_CN' : 'en')];
 
   const stats = () => page.evaluate(() => ({
     mines: window.minesweeper3d.state.board.mineTotal,
@@ -169,20 +173,74 @@ try {
         world.refresh(hidden[k]);
       }
       world.refresh(i);
-      return { x: sx, y: sy, need, face, revealed: b.revealedCount };
+      return { x: sx, y: sy, index: i, need, face, revealed: b.revealedCount };
     }
     return null;
   });
   if (chordSetup) {
-    // 记录实际到达画布的事件序列，便于定位是浏览器没发还是逻辑没走
-    await page.evaluate(() => {
+    await page.mouse.move(chordSetup.x, chordSetup.y);
+    await page.mouse.down({ button: 'left' });
+    await page.mouse.down({ button: 'right' });
+    const highlight = await page.evaluate(({ index, face }) => {
+      const { world, state } = window.minesweeper3d;
+      const b = state.board;
+      const related = b.relatedCells(index, face);
+      const expected = related.filter((i) => b.states[i] === 0 || b.states[i] === 3 || b.states[i] === 2);
+      const flags = related.filter((i) => b.states[i] === 2);
+      const other = world.cells.findIndex((cell, i) => i !== index && !related.includes(i) &&
+        b.states[i] === 0 && cell.root.visible && cell.cube.visible);
+      // 保存恢复前的引用，避免和弦揭示改变状态后把恢复检查变成空断言
+      window.chordVisualCheck = { flags, other };
+      const dim = other >= 0 ? world.cells[other].cube.material : null;
+      return {
+        matches: expected.length > 0 && world.highlighted.size === expected.length && expected.every((i) => world.highlighted.has(i)),
+        flags: flags.length > 0 && flags.every((i) => world.cells[i].cube.material === world.highlightMats.flag),
+        dimmed: !!dim && dim === world.dimMats.hidden && dim.transparent && !dim.depthWrite && Math.abs(dim.opacity - 0.15) < 1e-6,
+        protected: !world.dimmed.has(index) && related.every((i) => !world.dimmed.has(i)),
+        materials: expected.length > 0 && expected.every((i) => world.cells[i].cube.material === world.highlightMats[b.states[i] === 2 ? 'flag' : b.states[i] === 3 ? 'question' : 'hidden']),
+      };
+    }, chordSetup);
+    check(highlight.matches, '双键按住时高亮恰好覆盖未揭示关联格及旗子');
+    check(highlight.materials, '关联格使用高亮材质');
+    check(highlight.flags, '关联旗子使用金色高亮材质');
+    check(highlight.dimmed, '非关联可见未揭示格淡化且不写深度');
+    check(highlight.protected, '被按格和全部关联格均不淡化');
+    // 移到画布外清除提示后松开，避免本次恢复断言被实际和弦改变盘面干扰
+    await page.mouse.move(-10, -10);
+    await page.mouse.up({ button: 'left' });
+    await page.mouse.up({ button: 'right' });
+    check(await page.evaluate(() => {
+      const { world } = window.minesweeper3d;
+      const { flags, other } = window.chordVisualCheck;
+      return world.highlighted.size === 0 && world.dimmed.size === 0 &&
+        flags.every((i) => world.cells[i].cube.material === world.materials.flag) &&
+        other >= 0 && world.cells[other].cube.material === world.materials.hidden;
+    }), '离开画布并松开后旗子和非关联格恢复原材质');
 
-    });
+    // 关闭淡化时仍然高亮旗子；恢复开关后继续原来的和弦动作测试
+    await page.click('#btn-options');
+    await page.click('#dim-others-on-chord');
+    await page.keyboard.press('Escape');
+    await page.mouse.move(chordSetup.x, chordSetup.y);
+    await page.mouse.down({ button: 'left' });
+    await page.mouse.down({ button: 'right' });
+    check(await page.evaluate(() => {
+      const { world, settings } = window.minesweeper3d;
+      return !settings.dimOthersOnChord && world.dimmed.size === 0 &&
+        window.chordVisualCheck.flags.every((i) => world.cells[i].cube.material === world.highlightMats.flag);
+    }), '关闭淡化开关时仍高亮关联旗子');
+    await page.mouse.move(-10, -10);
+    await page.mouse.up({ button: 'left' });
+    await page.mouse.up({ button: 'right' });
+    await page.click('#btn-options');
+    await page.click('#dim-others-on-chord');
+    await page.keyboard.press('Escape');
     await page.mouse.move(chordSetup.x, chordSetup.y);
     await page.mouse.down({ button: 'left' });
     await page.mouse.down({ button: 'right' });
     await page.mouse.up({ button: 'left' });
     await page.mouse.up({ button: 'right' });
+    check(await page.evaluate(() => window.minesweeper3d.world.highlighted.size === 0 && window.minesweeper3d.world.dimmed.size === 0), '松开双键后清除高亮与淡化');
     await new Promise((r) => setTimeout(r, 250));
     const after = await page.evaluate(() => ({
       revealed: window.minesweeper3d.state.board.revealedCount,
@@ -205,32 +263,95 @@ try {
   const shownVersion = await page.$eval('#version', (e) => e.textContent);
   const pkgVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
   check(shownVersion.includes(pkgVersion), `版本号来自 package.json（${shownVersion.trim()}）`);
+
+  // 同时准备结算文案与尚未应用的开局设置，切语言不能重开或覆盖草稿
+  await page.evaluate(() => {
+    const { ui, state, world } = window.minesweeper3d;
+    window.languageSnapshot = { board: state.board, states: [...state.board.states], elapsed: state.elapsed, peel: world.peel };
+    ui.openBoard(7, 44);
+    ui.showResult(true, 83.4, 5, 38);
+  });
+  for (const lang of ['en', 'zh_CN']) {
+    await page.select('#lang', lang);
+    const translated = await page.evaluate((table) => {
+      const { state, world, settings } = window.minesweeper3d;
+      const snapshot = window.languageSnapshot;
+      const text = (key, vars = {}) => table[key].replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ''));
+      const b = state.board;
+      const statusKey = b.gameOver ? (b.won ? 'statusWon' : 'statusLost') : 'statusStart';
+      return {
+        htmlLang: document.documentElement.lang,
+        staticText: [...document.querySelectorAll('[data-text]')].every((el) => el.textContent === text(el.dataset.text)),
+        accessible: [...document.querySelectorAll('[data-aria-label]')].every((el) => el.getAttribute('aria-label') === text(el.dataset.ariaLabel)),
+        title: document.title === table.appTitle,
+        stats: document.getElementById('stats').textContent === text('stats', { mines: b.mineTotal, flags: b.flagCount, opened: b.revealedCount, need: b.total - b.mineTotal }),
+        status: document.getElementById('status').textContent === table[statusKey],
+        hint: document.getElementById('hint').textContent.includes(table.hintPeel),
+        peel: document.getElementById('peel-value').textContent === text('peelDepth', { depth: world.peel, max: Math.floor((b.side - 1) / 2) }),
+        result: !document.getElementById('result').hidden && document.getElementById('result-title').textContent === table.resultWon &&
+          document.getElementById('result-detail').textContent === text('resultDetail', { side: 5, mines: 38 }) && document.getElementById('result-time').textContent === '01:23',
+        draft: document.getElementById('side').value === '7' && document.getElementById('mines').value === '44' &&
+          document.getElementById('board-hint').textContent === text('boardHint', { side: 7, total: 343, density: (44 / 343 * 100).toFixed(1), rec: 103 }),
+        preserved: state.board === snapshot.board && [...state.board.states].every((v, i) => v === snapshot.states[i]) &&
+          state.elapsed === snapshot.elapsed && world.peel === snapshot.peel,
+        preference: settings.lang,
+        stored: JSON.parse(localStorage.getItem('minesweeper3d.settings')).lang,
+      };
+    }, messages[lang]);
+    check(translated.htmlLang === (lang === 'en' ? 'en' : 'zh-CN') && translated.staticText && translated.title && translated.accessible,
+      `${lang} 即时更新按钮、选项、标题、无障碍标签与 html lang`);
+    check(translated.stats && translated.status && translated.hint && translated.peel && translated.result && translated.draft,
+      `${lang} 即时更新 HUD、状态、操作提示、剥层、结算与推荐雷数文案`);
+    check(translated.preserved && translated.preference === lang && translated.stored === lang,
+      `${lang} 已持久化，棋盘、计时和剥层保持不变`);
+  }
+  await page.evaluate(() => {
+    const { ui } = window.minesweeper3d;
+    ui.hideResult();
+    ui.closeBoard();
+  });
+
   await page.keyboard.press('Escape');
   await new Promise((r) => setTimeout(r, 200));
   check(await page.$eval('#options-panel', (e) => e.hidden), 'Esc 关掉选项页');
 
-  // 结算弹窗：直接揭示到胜利
-  await page.evaluate(() => {
-    const { state, world } = window.minesweeper3d;
-    const b = state.board;
-    for (let i = 0; i < b.total; i++) {
-      if (b.mines[i] === 0) {
-        const res = b.reveal(i);
-        world.refreshArea(res.opened);
-      }
-    }
-    window.minesweeper3d.ui?.updateStats?.();
-  });
-  await new Promise((r) => setTimeout(r, 300));
-  const won = await page.evaluate(() => window.minesweeper3d.state.board.won);
-
-  check(errors.length === 0, `控制台无报错${errors.length ? '：' + errors.slice(0, 2).join(' | ') : ''}`);
+  // 剥层：真实键盘输入，隐藏外壳后拾取应穿过它
+  await page.keyboard.press('r');
+  const outer = await centerOf(hi, hi, hi);
+  await page.keyboard.press('h');
+  const peeled = await page.evaluate(({ x, y }) => {
+    const { world } = window.minesweeper3d;
+    const hit = world.pick(x, y);
+    return {
+      depth: world.peel,
+      hidden: world.cells.filter((c) => c.layer === 0).every((c) => !c.root.visible),
+      inner: world.cells.filter((c) => c.layer >= 1).every((c) => c.root.visible),
+      pick: !hit || world.cells[hit.index].layer > 0,
+      label: document.getElementById('peel-value').textContent,
+    };
+  }, outer);
+  check(peeled.depth === 1 && peeled.hidden && peeled.inner, 'H 隐藏最外层，保留内层');
+  const peelStrings = await currentStrings();
+  check(peeled.label === peelStrings.peelDepth.replace('{depth}', '1').replace('{max}', String(Math.floor((side - 1) / 2))),
+    '剥层文案按当前语言显示深度');
+  check(peeled.pick, '外层屏幕坐标拾取不会命中隐藏外层');
+  await page.keyboard.down('Shift');
+  await page.keyboard.press('h');
+  await page.keyboard.up('Shift');
+  check(await page.evaluate(() => {
+    const { world } = window.minesweeper3d;
+    return world.peel === 0 && world.cells.every((c) => c.root.visible);
+  }), 'Shift+H 恢复第 0 层');
+  await page.keyboard.press('h');
+  await page.keyboard.press('r');
+  check(await page.evaluate(() => window.minesweeper3d.world.peel === 0), 'R 重开重置剥层深度');
 
   // 结算弹窗：直接调 UI，验证文案与按钮
+  const resultStrings = await currentStrings();
   await page.evaluate(() => window.minesweeper3d.ui.showResult(true, 83.4, 5, 38));
   await new Promise((r) => setTimeout(r, 150));
   check(await page.$eval('#result', (e) => !e.hidden), '结算弹窗可以打开');
-  check((await page.$eval('#result-title', (e) => e.textContent)) === '清空', '胜利标题是「清空」');
+  check((await page.$eval('#result-title', (e) => e.textContent)) === resultStrings.resultWon, '胜利标题使用当前语言');
   check((await page.$eval('#result-time', (e) => e.textContent)) === '01:23', '用时格式化成 mm:ss');
   await page.click('#result-again');
   await new Promise((r) => setTimeout(r, 300));
@@ -241,6 +362,22 @@ try {
   check(restarted.hidden, '再来一局会关掉弹窗');
   check(restarted.revealed === 0, '再来一局重置盘面');
 
+  // URL 仅临时覆盖语言：即使已保存中文，新页面也显示英文，存档仍是中文
+  const urlPage = await browser.newPage();
+  urlPage.on('pageerror', (e) => errors.push(String(e)));
+  urlPage.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  await urlPage.goto(`${pathToFileURL(target).href}?seed=20261112&lang=en`);
+  await urlPage.waitForFunction(() => window.minesweeper3d?.state.board, { timeout: 15000 });
+  const urlView = await urlPage.evaluate(() => ({
+    lang: document.documentElement.lang,
+    restart: document.getElementById('btn-restart').textContent,
+    preference: window.minesweeper3d.settings.lang,
+    stored: JSON.parse(localStorage.getItem('minesweeper3d.settings')).lang,
+  }));
+  check(urlView.lang === 'en' && urlView.restart === messages.en.restart, '?lang=en 临时覆盖已保存的中文选择');
+  check(urlView.preference === 'zh_CN' && urlView.stored === 'zh_CN', 'URL 语言覆盖不写入 settings 或存档');
+  await urlPage.close();
+
   // 截图前把间距还原成 100%，便于看默认观感
   await page.evaluate(() => {
     const el = document.getElementById('spacing');
@@ -249,6 +386,7 @@ try {
   });
   await new Promise((r) => setTimeout(r, 400));
   await page.screenshot({ path: 'dist/e2e.png' });
+  check(errors.length === 0, `控制台无报错${errors.length ? '：' + errors.slice(0, 2).join(' | ') : ''}`);
   console.log(`\n${failures === 0 ? 'PASS' : `FAIL ${failures}`}`);
   process.exitCode = failures === 0 ? 0 : 1;
 } finally {

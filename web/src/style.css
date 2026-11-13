@@ -133,7 +133,7 @@ button.toggle[aria-pressed="true"] {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 48px;
+  bottom: 94px;
   margin: 0;
   text-align: center;
   font-size: 13px;
@@ -337,4 +337,46 @@ input[type="range"]::-moz-range-thumb {
     justify-content: flex-end;
     padding: 0 14px 12px;
   }
+}
+
+/* 剥层与间距放在一起 */
+.view-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.peel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.peel button {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 语言名用本族语显示，给双语标签与较长的自动选项留出空间 */
+.language-row {
+  flex-wrap: wrap;
+}
+
+.language-row label {
+  width: auto;
+}
+
+#lang {
+  min-width: 0;
+  flex-basis: 100%;
 }

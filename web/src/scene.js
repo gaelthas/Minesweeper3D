@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { makeNumberTexture, makeFlagTexture, makeQuestionTexture } from './geometry.js';
-import { Board, HIDDEN, REVEALED, FLAGGED, QUESTION } from './logic.js';
+import { Board, HIDDEN, REVEALED, FLAGGED, QUESTION, closedFaceMask } from './logic.js';
 
 // 立方体边长与收缩比例，和 Godot 版保持一致
 export const HIDDEN_SIZE = 0.88;
@@ -76,6 +76,18 @@ export class World {
       hit: new THREE.MeshStandardMaterial({ color: COLORS.hit, roughness: 0.4, emissive: 0xff2222, emissiveIntensity: 0.35 }),
     };
 
+    // 高亮材质只创建一次，避免改共享基础材质影响整盘
+    this.highlighted = new Set();
+    this.highlightMats = {};
+    for (const key of ['hidden', 'question', 'flag']) {
+      const mat = this.materials[key].clone();
+      mat.emissive.setHex(key === 'flag' ? 0xd99420 : 0x397dcc);
+      mat.emissiveIntensity = 0.65;
+      this.highlightMats[key] = mat;
+    }
+    this.dimmed = new Set();
+    this.peel = 0;
+
     // 踩中的那颗整体染红并自发光，和 Godot 版一致
     this.hitMineMaterials = mineParts.map((part) => {
       const material = part.material.clone();
@@ -84,6 +96,18 @@ export class World {
       material.emissiveIntensity = 0.75;
       return material;
     });
+
+    // 淡化材质预建，移动指针只切换引用；不写深度，避免挡住关联格
+    const dimMaterial = (base) => {
+      const mat = base.clone();
+      mat.transparent = true;
+      mat.opacity = base.opacity * 0.15;
+      mat.depthWrite = false;
+      return mat;
+    };
+    this.dimMats = Object.fromEntries(Object.entries(this.materials).map(([key, mat]) => [key, dimMaterial(mat)]));
+    this.dimMineMaterials = mineParts.map((part) => dimMaterial(part.material));
+    this.dimHitMineMaterials = this.hitMineMaterials.map(dimMaterial);
 
     this.numberMats = [];
     for (let n = 1; n <= 9; n++) {
@@ -158,6 +182,9 @@ export class World {
   /* ---------------- 盘面 ---------------- */
 
   build(board, pitch) {
+    this.highlighted.clear();
+    this.dimmed.clear();
+    this.peel = 0;
     this.board = board;
     this.pitch = pitch;
     this.openView = pitch >= OPEN_VIEW_PITCH;
@@ -176,6 +203,7 @@ export class World {
           const cell = this._makeCell(i);
           cell.root.position.set(x * pitch - offset, y * pitch - offset, z * pitch - offset);
           cell.coord = [x, y, z];
+          cell.layer = Math.min(x, y, z, n - 1 - x, n - 1 - y, n - 1 - z);
           this.group.add(cell.root);
           this.cells[i] = cell;
           this.meshes.push(cell.cube);
@@ -223,16 +251,16 @@ export class World {
   faceMask(i) {
     if (this.openView) return 63;
     const board = this.board;
+    let mask = closedFaceMask(board, i);
+    if (this.peel === 0) return mask;
     const [x, y, z] = board.coord(i);
-    let mask = 0;
     for (let f = 0; f < 6; f++) {
       const [dx, dy, dz] = DIRS[f];
       const nx = x + dx;
       const ny = y + dy;
       const nz = z + dz;
-      if (!board.inBounds(nx, ny, nz)) {
-        mask |= 1 << f;
-      } else if (board.states[board.index(nx, ny, nz)] === REVEALED) {
+      if (board.inBounds(nx, ny, nz) &&
+        Math.min(nx, ny, nz, board.side - 1 - nx, board.side - 1 - ny, board.side - 1 - nz) < this.peel) {
         mask |= 1 << f;
       }
     }
@@ -240,10 +268,17 @@ export class World {
   }
 
   _applyCell(i) {
+    this._applyCellBase(i);
+    this._applyEmphasis(i);
+  }
+
+  _applyCellBase(i) {
     const board = this.board;
     const cell = this.cells[i];
     const state = board.states[i];
     const cube = cell.cube;
+    cell.root.visible = cell.layer >= this.peel;
+    cube.visible = true;
 
     for (const f of cell.faces) f.visible = false;
     for (const m of cell.marks) m.visible = false;
@@ -253,7 +288,7 @@ export class World {
 
     if (state === FLAGGED || state === QUESTION) {
       const size = REVEALED_SIZE;
-      cube.material = state === FLAGGED ? this.materials.flag : this.materials.question;
+      cube.material = state === FLAGGED ? this.materials.flag : (this.highlighted.has(i) ? this.highlightMats.question : this.materials.question);
       cube.scale.setScalar(size);
       const mask = this.faceMask(i);
       const mat = state === FLAGGED ? this.flagMat : this.questionMat;
@@ -274,7 +309,7 @@ export class World {
     }
 
     if (state !== REVEALED) {
-      cube.material = this.materials.hidden;
+      cube.material = this.highlighted.has(i) ? this.highlightMats.hidden : this.materials.hidden;
       cube.scale.setScalar(HIDDEN_SIZE);
       cube.visible = true;
       cell.sign = 0;
@@ -301,11 +336,12 @@ export class World {
       if (!(mask & (1 << f))) continue;
       if (fc[f] <= 0) continue;
       const sign = cell.faces[f];
-      const tex = this.numberMats[Math.min(fc[f], 9)].map;
+      const tex = this.numberMats[fc[f]].map;
       if (sign.material.map !== tex) {
         sign.material.map = tex;
         sign.material.needsUpdate = true;
       }
+      sign.userData.facingOpacity = 1;
       sign.material.opacity = 1;
       sign.scale.setScalar(REVEALED_SIZE * 0.56);
       sign.position.copy(new THREE.Vector3(...FACE_NORMALS[f]).multiplyScalar(REVEALED_SIZE * 0.5 + 0.004));
@@ -314,6 +350,69 @@ export class World {
     }
     cell.mask = mask;
     cell.sign = 1;
+  }
+
+  /** 只切材质与透明度，不重画面片，也不改变可见性或拾取 */
+  _applyEmphasis(i) {
+    const cell = this.cells[i];
+    const state = this.board.states[i];
+    const key = state === FLAGGED ? 'flag' : state === QUESTION ? 'question' : state === REVEALED ? 'open' : 'hidden';
+    const dimmed = this.dimmed.has(i);
+    cell.dimmed = dimmed;
+    cell.cube.material = dimmed ? this.dimMats[key] : this.highlighted.has(i) ? this.highlightMats[key] : this.materials[key];
+    cell.cube.renderOrder = dimmed ? -1 : 0;
+    // 数字面本来就透明且不写深度，保留其视角淡出值再乘和弦系数
+    for (const face of cell.faces) {
+      face.material.opacity = (face.userData.facingOpacity ?? 1) * (dimmed ? 0.15 : 1);
+      face.renderOrder = dimmed ? -1 : 0;
+    }
+    for (const mark of cell.marks) {
+      mark.material.opacity = dimmed ? 0.15 : 1;
+      mark.renderOrder = dimmed ? -1 : 0;
+    }
+    if (cell.mine) {
+      const hit = i === this.board.hitIndex;
+      for (const child of cell.mine.children) {
+        const part = child.userData.partIndex;
+        child.material = dimmed
+          ? (hit ? this.dimHitMineMaterials[part] : this.dimMineMaterials[part])
+          : (hit ? this.hitMineMaterials[part] : child.userData.baseMaterial);
+        child.renderOrder = dimmed ? -1 : 0;
+      }
+    }
+  }
+
+  setHighlight(indices, target = -1, dimOthers = false) {
+    const related = new Set(indices);
+    const next = new Set(indices.filter((i) => this.cells[i] && i !== target &&
+      (this.board.states[i] === HIDDEN || this.board.states[i] === QUESTION || this.board.states[i] === FLAGGED)));
+    const dimmed = new Set();
+    if (dimOthers && target >= 0) {
+      for (let i = 0; i < this.cells.length; i++) {
+        if (i !== target && !related.has(i)) dimmed.add(i);
+      }
+    }
+    // 相同目标和集合不触碰材质；切换时只更新状态发生变化的格子
+    const changed = new Set();
+    for (const [before, after] of [[this.highlighted, next], [this.dimmed, dimmed]]) {
+      for (const i of before) if (!after.has(i)) changed.add(i);
+      for (const i of after) if (!before.has(i)) changed.add(i);
+    }
+    this.highlighted = next;
+    this.dimmed = dimmed;
+    for (const i of changed) this._applyEmphasis(i);
+  }
+
+  clearHighlight() {
+    this.setHighlight([]);
+  }
+
+  setPeel(depth) {
+    this.peel = Math.max(0, Math.min(Math.floor(depth), Math.floor((this.board.side - 1) / 2)));
+    for (let i = 0; i < this.cells.length; i++) this._applyCell(i);
+    // 重画面片后恢复结算中的雷模型
+    if (this.board.gameOver && !this.board.won) this.markMines();
+    this.dirtyFacing = true;
   }
 
   /** 界面状态变化后重画单格 */
@@ -355,6 +454,7 @@ export class World {
       for (const child of mine.children) {
         child.material = hit ? this.hitMineMaterials[child.userData.partIndex] : child.userData.baseMaterial;
       }
+      this._applyEmphasis(i);
     }
     this.dirtyFacing = true;
   }
@@ -397,6 +497,7 @@ export class World {
     // 可见面集合变了才需要重画数字
     if (wasOpen !== this.openView) {
       for (let i = 0; i < this.cells.length; i++) if (this.cells[i]) this._applyCell(i);
+      if (board.gameOver && !board.won) this.markMines();
     }
     this.dirtyFacing = true;
   }
@@ -416,7 +517,8 @@ export class World {
         const center = cell.root.position.clone().addScaledVector(n, half);
         const toCam = cam.clone().sub(center).normalize();
         const alpha = Math.min(1, Math.max(0, (n.dot(toCam) - 0.26) / 0.14));
-        target.material.opacity = alpha;
+        target.userData.facingOpacity = alpha;
+        target.material.opacity = alpha * (cell.dimmed ? 0.15 : 1);
         target.visible = alpha > 0.02;
       }
     }
@@ -425,13 +527,16 @@ export class World {
   /** 屏幕坐标 → { index, face } */
   pick(px, py) {
     const rect = this.canvas.getBoundingClientRect();
+    if (px < rect.left || px >= rect.right || py < rect.top || py >= rect.bottom) return null;
+    this.scene.updateMatrixWorld(true);
+    this.camera.updateMatrixWorld(true);
     const ndc = new THREE.Vector2(
       ((px - rect.left) / rect.width) * 2 - 1,
       -((py - rect.top) / rect.height) * 2 + 1
     );
     const ray = new THREE.Raycaster();
     ray.setFromCamera(ndc, this.camera);
-    const hits = ray.intersectObjects(this.meshes, false);
+    const hits = ray.intersectObjects(this.meshes.filter((mesh) => mesh.visible && mesh.parent.visible), false);
     for (const hit of hits) {
       if (!hit.object.visible) continue;
       const idx = hit.object.userData.cellIndex;
