@@ -1,4 +1,4 @@
-// 单文件构建的资源来源：全部以 data URI 内联，双击 HTML 就能跑。
+// 单文件构建以 data URI 内联；开发模式通过 URL 加载资源。
 // mapp 构建会通过 vite alias 换成 assets-sdk.js，那边走 sdk.assets.readBytes。
 
 import glbUrl from '../../prototypes/minecube/assets/cube_rounded.glb?url';
@@ -33,7 +33,14 @@ function dataUriToBytes(uri) {
 export async function loadAsset(path) {
   const uri = INLINE[path];
   if (!uri) throw new Error(`未知资源：${path}`);
-  return dataUriToBytes(uri);
+  if (uri.startsWith('data:') && /;base64$/i.test(uri.slice(0, uri.indexOf(',')))) {
+    return dataUriToBytes(uri);
+  }
+
+  // 普通 URL 与非 base64 的 data URI 都交给 fetch 解码
+  const res = await fetch(uri);
+  if (!res.ok) throw new Error(`资源加载失败：${path}（HTTP ${res.status}）`);
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 export function initSdk() {}
