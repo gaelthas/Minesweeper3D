@@ -1,5 +1,5 @@
 // 把 dist/app 的构建产物和包内资源组装成平台要求的 app.zip。
-// 用法：MINI_APP_ID=<应用ID> MINI_APP_VERSION=1.0.0 npm run build:app
+// 用法：MINI_APP_ID=<应用ID> MINI_APP_VERSION=1.1.0 npm run build:app
 
 import { readFile } from 'node:fs/promises';
 import { pack } from '@discourse-mini-app/sdk/pack';

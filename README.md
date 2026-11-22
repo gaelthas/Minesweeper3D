@@ -4,7 +4,7 @@
 
 同一套玩法有两个实现：**Godot 桌面版**（原型，`prototypes/minecube`）和 **Web 版**（Three.js，打包成单个 HTML，`web/`）。
 
-Web 版 · v0.1.0 · Godot 版 · v0.5.0
+Web 版 / Godot 版 · v1.1.0
 
 在线试玩：[gaelthas.github.io/gaelthas/minecube](https://gaelthas.github.io/gaelthas/minesweeper3d/)
 
@@ -67,7 +67,7 @@ npm run build    # 产出 dist/index.html（单文件）
 
 ```sh
 cd web
-MINI_APP_ID=<平台分配的应用 ID> MINI_APP_VERSION=1.0.0 npm run build:app
+MINI_APP_ID=<平台分配的应用 ID> MINI_APP_VERSION=1.1.0 npm run build:app
 # 产物：build/package/app.zip
 ```
 

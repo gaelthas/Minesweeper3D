@@ -237,7 +237,7 @@ func _build_footer() -> HBoxContainer:
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var version: String = str(ProjectSettings.get_setting("application/config/version", "dev"))
-	var l := UiKit.label("MineCube 3D  v%s" % version, 12, UiKit.INK_SOFT)
+	var l := UiKit.label("Minesweeper3D  v%s" % version, 12, UiKit.INK_SOFT)
 	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(l)
