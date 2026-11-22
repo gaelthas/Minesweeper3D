@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import { makeNumberTexture, makeFlagTexture, makeQuestionTexture } from './geometry.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { makeNumberTexture, makeFlagTexture, makeQuestionTexture, makeWrongTexture } from './geometry.js';
 import { Board, HIDDEN, REVEALED, FLAGGED, QUESTION } from './logic.js';
 
 // 立方体边长与收缩比例，和 Godot 版保持一致
@@ -15,6 +18,7 @@ const COLORS = {
   open: 0x363f50,
   mine: 0xa32832,
   hit: 0xff5151,
+  wrong: 0x8f3038,
 };
 
 // 面的顺序 +Z -Z +X -X +Y -Y，与 logic.js 的 FACE_AXIS 对齐
@@ -51,7 +55,8 @@ export class World {
 
     // 相机：球坐标绕 pivot 转，pivot 可平移
     this.yaw = 38;
-    this.pitch = 34;
+    // 相机俯仰用角度；this.pitch 是格距倍率，两者不能共用一个字段
+    this.cameraPitch = 34;
     this.distance = 8;
     this.pivot = new THREE.Vector3();
 
@@ -74,6 +79,7 @@ export class World {
       open: new THREE.MeshStandardMaterial({ color: COLORS.open, roughness: 0.55, metalness: 0 }),
       mine: new THREE.MeshStandardMaterial({ color: COLORS.mine, roughness: 0.45, metalness: 0 }),
       hit: new THREE.MeshStandardMaterial({ color: COLORS.hit, roughness: 0.4, emissive: 0xff2222, emissiveIntensity: 0.35 }),
+      wrong: new THREE.MeshStandardMaterial({ color: COLORS.wrong, roughness: 0.6, metalness: 0 }),
     };
 
     // 踩中的那颗整体染红并自发光，和 Godot 版一致
@@ -93,15 +99,25 @@ export class World {
     }
     this.flagMat = new THREE.MeshBasicMaterial({ map: makeFlagTexture(), transparent: true, depthWrite: false });
     this.questionMat = new THREE.MeshBasicMaterial({ map: makeQuestionTexture(), transparent: true, depthWrite: false });
+    this.wrongMat = new THREE.MeshBasicMaterial({ map: makeWrongTexture(), transparent: true, depthWrite: false });
 
     this.group = new THREE.Group();
-    this.scene.add(this.group);
+    this.axesGroup = new THREE.Group();
+    this.gridGroup = new THREE.Group();
+    this.scene.add(this.group, this.axesGroup, this.gridGroup);
 
+    this.showAxes = false;
+    this.showGrid = false;
+    this.axisWidth = 2;
+    this.gridWidth = 1;
+    this.axisOpacity = 0.9;
+    this.gridOpacity = 0.28;
     this.cells = [];
     this.meshes = [];
     this.pitch = 1;
     this.openView = false;
     this.dirtyFacing = true;
+    this.cutawayDistance = 0;
 
     this._resize();
   }
@@ -110,6 +126,10 @@ export class World {
     const w = this.canvas.clientWidth || 1;
     const h = this.canvas.clientHeight || 1;
     this.renderer.setSize(w, h, false);
+    for (const group of [this.axesGroup, this.gridGroup]) {
+      if (!group) continue;
+      for (const child of group.children) child.material?.resolution?.set(w, h);
+    }
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -119,11 +139,89 @@ export class World {
     this.dirtyFacing = true;
   }
 
+  /* ---------------- 辅助线 ---------------- */
+
+  setGuides(options) {
+    this.showAxes = !!options.showAxes;
+    this.showGrid = !!options.showGrid;
+    this.axisWidth = Math.max(1, Number(options.axisWidth) || 2);
+    this.gridWidth = Math.max(1, Number(options.gridWidth) || 1);
+    this.axisOpacity = Math.min(1, Math.max(0, Number(options.axisOpacity) / 100));
+    this.gridOpacity = Math.min(1, Math.max(0, Number(options.gridOpacity) / 100));
+    this.axesGroup.visible = this.showAxes;
+    this.gridGroup.visible = this.showGrid;
+    this._buildGuides();
+  }
+
+  _clearGuides(group) {
+    for (const child of [...group.children]) {
+      group.remove(child);
+      child.geometry?.dispose();
+      child.material?.dispose();
+    }
+  }
+
+  _guideMaterial(color, opacity, width) {
+    const mat = new LineMaterial({
+      color,
+      linewidth: width,
+      transparent: true,
+      opacity,
+      depthTest: true,
+      depthWrite: false,
+    });
+    mat.resolution.set(this.canvas.clientWidth || 1, this.canvas.clientHeight || 1);
+    return mat;
+  }
+
+  _buildGuides() {
+    this._clearGuides(this.axesGroup);
+    this._clearGuides(this.gridGroup);
+    if (!this.board) return;
+
+    const n = this.board.side;
+    const half = (n * this.pitch) / 2;
+    // 只到盘面边界外一点点，避免看起来像无限延伸
+    const extent = half + this.pitch * 0.25;
+
+    for (const [dir, color] of [
+      [[1, 0, 0], 0xe5484d],
+      [[0, 1, 0], 0x4bb96a],
+      [[0, 0, 1], 0x4f7fe8],
+    ]) {
+      const geo = new LineSegmentsGeometry();
+      geo.setPositions([
+        -dir[0] * extent, -dir[1] * extent, -dir[2] * extent,
+        dir[0] * extent, dir[1] * extent, dir[2] * extent,
+      ]);
+      const line = new LineSegments2(geo, this._guideMaterial(color, this.axisOpacity, this.axisWidth));
+      this.axesGroup.add(line);
+    }
+
+    const points = [];
+    for (let a = 0; a <= n; a++) {
+      const u = -half + a * this.pitch;
+      for (let b = 0; b <= n; b++) {
+        const v = -half + b * this.pitch;
+        points.push(-half, u, v, half, u, v);
+        points.push(u, -half, v, u, half, v);
+        points.push(u, v, -half, u, v, half);
+      }
+    }
+    const geo = new LineSegmentsGeometry();
+    geo.setPositions(points);
+    const grid = new LineSegments2(geo, this._guideMaterial(0x9aa8c0, this.gridOpacity, this.gridWidth));
+    this.gridGroup.add(grid);
+
+    this.axesGroup.visible = this.showAxes;
+    this.gridGroup.visible = this.showGrid;
+  }
+
   /* ---------------- 相机 ---------------- */
 
   applyCamera() {
     const y = (this.yaw * Math.PI) / 180;
-    const p = (this.pitch * Math.PI) / 180;
+    const p = (this.cameraPitch * Math.PI) / 180;
     const dir = new THREE.Vector3(Math.cos(p) * Math.sin(y), Math.sin(p), Math.cos(p) * Math.cos(y));
     this.camera.position.copy(this.pivot).addScaledVector(dir, this.distance);
     this.camera.lookAt(this.pivot);
@@ -138,7 +236,7 @@ export class World {
 
   orbit(dx, dy) {
     this.yaw -= dx * 0.32;
-    this.pitch = Math.min(86, Math.max(-86, this.pitch + dy * 0.32));
+    this.cameraPitch = Math.min(86, Math.max(-86, this.cameraPitch + dy * 0.32));
     this.applyCamera();
   }
 
@@ -175,6 +273,7 @@ export class World {
           const i = board.index(x, y, z);
           const cell = this._makeCell(i);
           cell.root.position.set(x * pitch - offset, y * pitch - offset, z * pitch - offset);
+          cell.basePosition.copy(cell.root.position);
           cell.coord = [x, y, z];
           this.group.add(cell.root);
           this.cells[i] = cell;
@@ -183,6 +282,7 @@ export class World {
         }
       }
     }
+    this._buildGuides();
     this.dirtyFacing = true;
   }
 
@@ -191,11 +291,23 @@ export class World {
     return new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
   }
 
+  /** 镜头距离小于该值时开始剥离；越靠近剥得越多，远离后自动恢复 */
+  setCutaway(distance) {
+    this.cutawayDistance = Math.max(0, Number(distance) || 0);
+    this.dirtyFacing = true;
+  }
+
   _makeCell(i) {
     const root = new THREE.Group();
 
     const cube = new THREE.Mesh(this.cubeGeo, this.materials.hidden);
     cube.userData.cellIndex = i;
+    cube.userData.baseVisible = true;
+    cube.userData.mineBaseVisible = false;
+    cube.userData.peeled = false;
+    cube.userData.peelT = 0;
+    cube.userData.wrongFlag = false;
+    cube.userData.forceRevealed = false;
     root.add(cube);
 
     const faces = [];
@@ -216,7 +328,13 @@ export class World {
       marks.push(mark);
     }
 
-    return { root, cube, faces, marks, sign: 0, mask: 0, planes: new Array(6).fill(null), mine: undefined };
+    return {
+      root, cube, faces, marks, sign: 0, mask: 0,
+      basePosition: new THREE.Vector3(),
+      planes: new Array(6).fill(null),
+      markPlanes: new Array(6).fill(null),
+      mine: undefined,
+    };
   }
 
   /** 相邻格是否已揭示（决定哪些面朝外可见） */
@@ -242,21 +360,28 @@ export class World {
   _applyCell(i) {
     const board = this.board;
     const cell = this.cells[i];
-    const state = board.states[i];
     const cube = cell.cube;
+    const state = cube.userData.forceRevealed ? REVEALED : board.states[i];
 
     for (const f of cell.faces) f.visible = false;
     for (const m of cell.marks) m.visible = false;
     cell.mask = 0;
     cell.planes.fill(null);
+    cell.markPlanes.fill(null);
+    cube.userData.mineBaseVisible = false;
     if (cell.mine) cell.mine.visible = false;
 
     if (state === FLAGGED || state === QUESTION) {
       const size = REVEALED_SIZE;
-      cube.material = state === FLAGGED ? this.materials.flag : this.materials.question;
+      const wrong = state === FLAGGED && cube.userData.wrongFlag;
+      cube.material = state === FLAGGED
+        ? (wrong ? this.materials.wrong : this.materials.flag)
+        : this.materials.question;
       cube.scale.setScalar(size);
+      cube.visible = true;
+      cube.userData.baseVisible = true;
       const mask = this.faceMask(i);
-      const mat = state === FLAGGED ? this.flagMat : this.questionMat;
+      const mat = wrong ? this.wrongMat : state === FLAGGED ? this.flagMat : this.questionMat;
       for (let f = 0; f < 6; f++) {
         if (!(mask & (1 << f))) continue;
         const m = cell.marks[f];
@@ -268,6 +393,7 @@ export class World {
         m.scale.setScalar(size * 0.5);
         m.position.copy(new THREE.Vector3(...FACE_NORMALS[f]).multiplyScalar(size * 0.5 + 0.004));
         m.visible = true;
+        cell.markPlanes[f] = m;
       }
       cell.mask = mask;
       return;
@@ -277,6 +403,7 @@ export class World {
       cube.material = this.materials.hidden;
       cube.scale.setScalar(HIDDEN_SIZE);
       cube.visible = true;
+      cube.userData.baseVisible = true;
       cell.sign = 0;
       return;
     }
@@ -288,11 +415,13 @@ export class World {
 
     if (has === 0) {
       cube.visible = false;
+      cube.userData.baseVisible = false;
       cell.sign = 0;
       return;
     }
 
     cube.visible = true;
+    cube.userData.baseVisible = true;
     cube.material = this.materials.open;
     cube.scale.setScalar(REVEALED_SIZE);
 
@@ -341,20 +470,40 @@ export class World {
       if (board.states[i] === FLAGGED) continue;
 
       cell.cube.visible = false;
+      cell.cube.userData.baseVisible = false;
+      cell.cube.userData.mineBaseVisible = true;
       for (const f of cell.faces) f.visible = false;
       for (const m of cell.marks) m.visible = false;
       cell.planes.fill(null);
+      cell.markPlanes.fill(null);
 
       const mine = this._mineFor(cell);
       if (!mine) continue;
       const hit = i === board.hitIndex;
       mine.visible = true;
+      cell.cube.userData.mineBaseVisible = true;
       // 模型原始直径约 0.79，格子是 1.0；缩到 0.62 才像嵌在格子里
       mine.scale.setScalar(hit ? 0.78 : 0.62);
       mine.rotation.y = ((i * 37) % 17) * 0.37;
       for (const child of mine.children) {
         child.material = hit ? this.hitMineMaterials[child.userData.partIndex] : child.userData.baseMaterial;
       }
+    }
+    this.dirtyFacing = true;
+  }
+
+  /** 结算时标出插错的旗，问号则翻出底下的数字 */
+  markWrongFlags() {
+    const board = this.board;
+    for (let i = 0; i < board.total; i++) {
+      if (board.mines[i] === 1) continue;
+      const state = board.states[i];
+      if (state !== FLAGGED && state !== QUESTION) continue;
+      const cell = this.cells[i];
+      if (!cell) continue;
+      if (state === FLAGGED) cell.cube.userData.wrongFlag = true;
+      else cell.cube.userData.forceRevealed = true;
+      this._applyCell(i);
     }
     this.dirtyFacing = true;
   }
@@ -393,33 +542,107 @@ export class World {
       if (!cell) continue;
       const [x, y, z] = cell.coord;
       cell.root.position.set(x * pitch - offset, y * pitch - offset, z * pitch - offset);
+      cell.basePosition.copy(cell.root.position);
     }
     // 可见面集合变了才需要重画数字
     if (wasOpen !== this.openView) {
       for (let i = 0; i < this.cells.length; i++) if (this.cells[i]) this._applyCell(i);
-      // 重画按 states 走，会把结算时摊开的雷盖回方块，补一遍
-      if (board.gameOver && !board.won) this.markMines();
+      // 重画按 states 走，会把结算时摊开的雷和错旗盖回方块，补一遍
+      if (board.gameOver && !board.won) {
+        this.markMines();
+        this.markWrongFlags();
+      }
     }
+    this._buildGuides();
     this.dirtyFacing = true;
   }
 
-  /** 掠射角上的面淡出，否则「1」会被压成别的形状 */
+  /** 每帧重算剥离层：优先整面剥离，视线接近对角时改为整角剥离 */
+  updateCutaway(delta = 1 / 60) {
+    // 距离按 5 阶盘标定；大棋盘取景更远，阈值同步放大，避免要拉到很远才剥离
+    const threshold = (this.cutawayDistance * this.board.side) / 5;
+    const layers = Math.max(0, Math.floor(threshold - this.distance));
+    const toCam = this.camera.position.clone().normalize();
+
+    // 相机正对某一面时剥整面，接近斜角时剥整角，避免切出零碎的一层
+    const axisValues = [toCam.x, toCam.y, toCam.z];
+    const order = axisValues.map((v, i) => ({ i, v })).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+    const cornerCut = Math.abs(order[1].v) >= Math.abs(order[0].v) * 0.6;
+    const signs = axisValues.map((v) => (v >= 0 ? 1 : -1));
+    let peelDir;
+    if (cornerCut) {
+      peelDir = new THREE.Vector3(signs[0], signs[1], signs[2]).normalize();
+    } else {
+      peelDir = new THREE.Vector3(0, 0, 0);
+      peelDir.setComponent(order[0].i, signs[order[0].i]);
+    }
+
+    const side = this.board.side;
+    const mid = (side - 1) / 2;
+    const count = Math.min(layers, side - 1);
+    let radius = 0;
+    for (const cell of this.cells) {
+      if (cell) radius = Math.max(radius, cell.basePosition.length());
+    }
+
+    // 整块沿同一方向飞出；起飞二次缓入加速，回位保留指数缓出减速
+    const escape = this.distance + radius + 5;
+    const returnEase = 1 - Math.exp(-9 * delta);
+    for (const cell of this.cells) {
+      if (!cell) continue;
+      const [x, y, z] = cell.coord;
+      const edge = [
+        mid - signs[0] * (x - mid),
+        mid - signs[1] * (y - mid),
+        mid - signs[2] * (z - mid),
+      ];
+      const peeled = count > 0 && (cornerCut
+        ? edge[0] < count && edge[1] < count && edge[2] < count
+        : edge[order[0].i] < count);
+      if (cell.cube.userData.peeled !== peeled) {
+        cell.cube.userData.peeled = peeled;
+        this.dirtyFacing = true;
+      }
+      if (!peeled && cell.root.position.distanceToSquared(cell.basePosition) > 1e-4) {
+        this.dirtyFacing = true;
+      }
+      if (peeled) {
+        const t = Math.min(1, cell.cube.userData.peelT + delta / 0.25);
+        cell.cube.userData.peelT = t;
+        cell.root.position.copy(cell.basePosition).addScaledVector(peelDir, escape * t * t);
+      } else {
+        cell.cube.userData.peelT = 0;
+        cell.root.position.lerp(cell.basePosition, returnEase);
+      }
+      cell.cube.visible = cell.cube.userData.baseVisible;
+      if (cell.mine) cell.mine.visible = cell.cube.userData.mineBaseVisible;
+    }
+  }
+
+  /** 掠射角上的数字淡出，否则「1」会被压成别的形状 */
   updateFacing() {
     if (!this.dirtyFacing) return;
     this.dirtyFacing = false;
     const cam = this.camera.position;
     const half = REVEALED_SIZE * 0.5;
+
     for (const cell of this.cells) {
       if (!cell) continue;
       for (let f = 0; f < 6; f++) {
+        const mark = cell.markPlanes[f];
+        if (mark) {
+          mark.material.opacity = 1;
+          mark.visible = true;
+        }
         const target = cell.planes[f];
         if (!target) continue;
         const n = new THREE.Vector3(...FACE_NORMALS[f]);
         const center = cell.root.position.clone().addScaledVector(n, half);
-        const toCam = cam.clone().sub(center).normalize();
-        const alpha = Math.min(1, Math.max(0, (n.dot(toCam) - 0.26) / 0.14));
-        target.material.opacity = alpha;
-        target.visible = alpha > 0.02;
+        const toFace = cam.clone().sub(center).normalize();
+        // 掠射角仍留一点可见度：从 dot=0.06 起淡入，0.24 起完全不透明
+        const facing = Math.min(1, Math.max(0, (n.dot(toFace) - 0.06) / 0.18));
+        target.material.opacity = facing;
+        target.visible = facing > 0.01;
       }
     }
   }
@@ -435,7 +658,7 @@ export class World {
     ray.setFromCamera(ndc, this.camera);
     const hits = ray.intersectObjects(this.meshes, false);
     for (const hit of hits) {
-      if (!hit.object.visible) continue;
+      if (!hit.object.visible || hit.object.userData.peeled) continue;
       const idx = hit.object.userData.cellIndex;
       const n = hit.face ? hit.face.normal : new THREE.Vector3(0, 1, 0);
       return { index: idx, face: faceFromNormal(n), point: hit.point };
@@ -443,7 +666,8 @@ export class World {
     return null;
   }
 
-  render() {
+  render(delta = 1 / 60) {
+    this.updateCutaway(delta);
     this.updateFacing();
     this.renderer.render(this.scene, this.camera);
   }

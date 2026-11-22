@@ -54,6 +54,11 @@
     <p class="sub" data-text="optionsSub"></p>
 
     <div class="row">
+      <label for="cutaway-distance" data-text="cutawayDistance"></label>
+      <input id="cutaway-distance" type="range" min="0" max="400" step="1" value="150" />
+      <output id="cutaway-distance-value">15.0</output>
+    </div>
+    <div class="row">
       <label for="volume" data-text="volume"></label>
       <input id="volume" type="range" min="0" max="100" step="1" value="70" />
       <output id="volume-value">70</output>
@@ -61,10 +66,6 @@
     <div class="row">
       <label data-text="mute"></label>
       <button id="mute" type="button" class="toggle" data-text="mute"></button>
-    </div>
-    <div class="row">
-      <label data-text="fpsLabel"></label>
-      <button id="show-fps" type="button" class="toggle" data-text="fpsButton"></button>
     </div>
 
     <div class="row">
@@ -78,6 +79,40 @@
     <div class="row">
       <label for="map-right" data-text="mouseRight"></label>
       <select id="map-right"></select>
+    </div>
+
+    <div class="row">
+      <label data-text="axesLabel"></label>
+      <button id="show-axes" type="button" class="toggle" data-text="toggleOff"></button>
+    </div>
+    <div class="row">
+      <label data-text="gridLabel"></label>
+      <button id="show-grid" type="button" class="toggle" data-text="toggleOff"></button>
+    </div>
+    <div class="row">
+      <label for="axis-width" data-text="axisWidth"></label>
+      <input id="axis-width" type="range" min="1" max="8" step="1" value="2" />
+      <output id="axis-width-value">2</output>
+    </div>
+    <div class="row">
+      <label for="axis-opacity" data-text="axisOpacity"></label>
+      <input id="axis-opacity" type="range" min="0" max="100" step="1" value="90" />
+      <output id="axis-opacity-value">90%</output>
+    </div>
+    <div class="row">
+      <label for="grid-width" data-text="gridWidth"></label>
+      <input id="grid-width" type="range" min="1" max="8" step="1" value="1" />
+      <output id="grid-width-value">1</output>
+    </div>
+    <div class="row">
+      <label for="grid-opacity" data-text="gridOpacity"></label>
+      <input id="grid-opacity" type="range" min="0" max="100" step="1" value="30" />
+      <output id="grid-opacity-value">30%</output>
+    </div>
+
+    <div class="row">
+      <label data-text="fpsLabel"></label>
+      <button id="show-fps" type="button" class="toggle" data-text="fpsButton"></button>
     </div>
 
     <div class="actions">

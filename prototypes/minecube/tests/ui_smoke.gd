@@ -16,6 +16,10 @@ func _initialize() -> void:
 func _process(_delta: float) -> bool:
 	_f += 1
 	match _f:
+		5:
+			# _ready 在首帧读盘，等它读完再关掉剥离，并立刻复位避免动画影响拾取
+			AppSettings.cutaway_distance = 0.0
+			_scene._update_cutaway(1.0)
 		6:
 			_test_pre_click_flag()
 		10:
@@ -46,7 +50,9 @@ func _process(_delta: float) -> bool:
 			_scene._timing = false
 		27:
 			_test_overlay_blocking()
-		28:
+		29:
+			_test_game_over_details()
+		30:
 			print("")
 			# 测试脚本直接退出，引擎会报 ObjectDB 泄漏；主场景正常退出时是干净的
 			print("PASS" if _fails == 0 else "FAIL %d" % _fails)
@@ -259,6 +265,11 @@ func _move(pos: Vector2) -> void:
 ## 选项页：改动即时生效并落盘
 ## 代码审查后补的回归项
 func _test_audit_fixes() -> void:
+	_check(_scene.find_children("*", "DirectionalLight3D", true, false).is_empty(),
+		"场景里不应有方向光或阴影")
+	_check(_scene.cells[0].mat is ShaderMaterial and _scene.cells[0].mat.shader != null,
+		"方块材质应为无光照固定面着色")
+
 	# 间距要落盘
 	_scene._on_spacing_changed(130.0)
 	var cfg := ConfigFile.new()
@@ -285,30 +296,123 @@ func _test_settings_page() -> void:
 	page.open()
 	_check(page.visible, "选项页应能打开")
 
+	var cfg := ConfigFile.new()
 	page._on_volume(35.0)
 	_check(AppSettings.volume == 35, "音量应更新为 35，实际 %d" % AppSettings.volume)
 
-	var cfg := ConfigFile.new()
+	page._on_axes(true)
+	page._on_grid(true)
+	_check(AppSettings.show_axes and AppSettings.show_grid, "坐标轴与网格开关应生效")
+	_check(_scene._axes_root.visible and _scene._grid_root.visible, "辅助线应即时显示")
+	_check(cfg.load(AppSettings.PATH) == OK
+		and bool(cfg.get_value("view", "show_axes", false))
+		and bool(cfg.get_value("view", "show_grid", false)),
+		"辅助线开关应落盘")
+	page._on_guide_style("axis_width", 4.0)
+	page._on_guide_style("axis_opacity", 55.0)
+	page._on_guide_style("grid_width", 3.0)
+	page._on_guide_style("grid_opacity", 40.0)
+	_check(AppSettings.axis_width == 4 and AppSettings.axis_opacity == 55
+		and AppSettings.grid_width == 3 and AppSettings.grid_opacity == 40,
+		"辅助线粗细与透明度应更新")
+	_check(cfg.load(AppSettings.PATH) == OK
+		and cfg.get_value("view", "axis_width", -1) == 4
+		and cfg.get_value("view", "axis_opacity", -1) == 55
+		and cfg.get_value("view", "grid_width", -1) == 3
+		and cfg.get_value("view", "grid_opacity", -1) == 40,
+		"辅助线样式应落盘")
+
+	page._on_axes(false)
+	page._on_grid(false)
+	_check(not _scene._axes_root.visible and not _scene._grid_root.visible, "辅助线应能关闭")
+
+	page._on_cutaway_distance(160.0)
+	_check(is_equal_approx(AppSettings.cutaway_distance, 16.0), "剥离距离应更新为 16.0，实际 %.1f" % AppSettings.cutaway_distance)
+
 	_check(cfg.load(AppSettings.PATH) == OK, "设置应已写入 user://settings.cfg")
 	_check(int(cfg.get_value("audio", "volume", -1)) == 35,
 		"落盘音量应为 35，实际 %s" % str(cfg.get_value("audio", "volume", -1)))
+	_check(is_equal_approx(float(cfg.get_value("view", "cutaway_distance", -1.0)), 16.0),
+		"剥离距离应落盘为 16.0，实际 %s" % str(cfg.get_value("view", "cutaway_distance", -1.0)))
+	_check(not cfg.has_section_key("view", "fade_depth"), "旧剥离厚度字段不应再落盘")
+	_check(not cfg.has_section_key("view", "near_opacity"), "透明度选项不应再落盘")
+
+	_scene._update_cutaway()
+	var peeled := 0
+	var kept := 0
+	var bad_peeled := 0
+	for c in _scene.cells:
+		if c.peeled:
+			peeled += 1
+			if c.body.collision_layer != 0 or c.position.distance_to(c.base_position) <= _scene.camera_rig.distance:
+				bad_peeled += 1
+		elif c.has_visible_content():
+			kept += 1
+	_check(peeled > 0 and kept > 0,
+		"镜头距离 %0.1f 时剥离外层（移出 %d / 保留 %d）" % [_scene.camera_rig.distance, peeled, kept])
+	_check(bad_peeled == 0, "被剥离的方块移出视野且不再参与拾取")
+
+	var original_distance: float = _scene.camera_rig.distance
+	_scene.camera_rig.zoom(3.0)
+	_scene._update_cutaway()
+	var far_peeled := 0
+	for c in _scene.cells:
+		if c.peeled:
+			far_peeled += 1
+	_check(far_peeled == 0, "缩远到距离外不剥离（移出 %d）" % far_peeled)
+
+	_scene.camera_rig.zoom(-5.0)
+	_scene._update_cutaway()
+	var near_peeled := 0
+	for c in _scene.cells:
+		if c.peeled:
+			near_peeled += 1
+	_check(near_peeled > peeled, "拉近后剥离更多（%d → %d）" % [peeled, near_peeled])
+	_scene.camera_rig.distance = original_distance
+	_scene.camera_rig._apply()
+
+	page._on_cutaway_distance(160.0)
+	_scene._update_cutaway()
+
+	var before_rotation := ""
+	for c in _scene.cells:
+		before_rotation += "1" if c.peeled else "0"
+	_scene.camera_rig.orbit(Vector2(180.0, 0.0))
+	_scene._update_cutaway()
+	var after_rotation := ""
+	for c in _scene.cells:
+		after_rotation += "1" if c.peeled else "0"
+	_check(after_rotation != before_rotation, "旋转视角会重新计算切面")
+	_scene.camera_rig.orbit(Vector2(-180.0, 0.0))
+	_scene._update_cutaway()
 
 	# 右下角的间距滑块：只平移方块中心，不改方块尺寸
 	var corner: int = _scene.logic.index_of(Vector3i(2, 2, 2))
 	var neighbor: int = _scene.logic.index_of(Vector3i(1, 2, 2))
-	var before_pos: Vector3 = _scene.cells[corner].position
+	var before_pos: Vector3 = _scene.cells[corner].base_position
+	var before_peeled := 0
+	for c in _scene.cells:
+		if c.peeled:
+			before_peeled += 1
 	_scene._on_spacing_changed(150.0)
 	_check(AppSettings.spacing == 150, "间距应为 150，实际 %d" % AppSettings.spacing)
 	_check(is_equal_approx(AppSettings.pitch(), 1.5), "倍率应为 1.5，实际 %.2f" % AppSettings.pitch())
 	_check(is_equal_approx(AppSettings.revealed_size(), 0.70),
 		"间距不应改变方块尺寸，实际 %.2f" % AppSettings.revealed_size())
+	_scene._update_cutaway()
+	var after_peeled := 0
+	for c in _scene.cells:
+		if c.peeled:
+			after_peeled += 1
+	_check(after_peeled == before_peeled,
+		"间距变化不改变剥离数量（%d → %d）" % [before_peeled, after_peeled])
 	# 手动摆一个已揭示格，避免依赖前面测试留下的盘面状态
 	_scene.cells[corner].apply(BoardLogic.REVEALED, 3, 63, [1, 1, 1, 1, 1, 1])
 	_check(is_equal_approx(_scene.cells[corner]._box.size.x, AppSettings.revealed_size()),
 		"已揭示格的碰撞盒应跟随 revealed_size()，实际 %.2f" % _scene.cells[corner]._box.size.x)
-	var gap: float = (_scene.cells[corner].position - _scene.cells[neighbor].position).length()
+	var gap: float = (_scene.cells[corner].base_position - _scene.cells[neighbor].base_position).length()
 	_check(is_equal_approx(gap, 1.5), "相邻方块中心距应为 1.5，实际 %.2f" % gap)
-	_check(not before_pos.is_equal_approx(_scene.cells[corner].position), "方块位置应随间距变化")
+	_check(not before_pos.is_equal_approx(_scene.cells[corner].base_position), "方块位置应随间距变化")
 	_scene._on_spacing_changed(100.0)
 	_check(is_equal_approx(AppSettings.pitch(), 1.0), "回到 100% 时倍率应为 1.0")
 
@@ -363,6 +467,32 @@ func _test_spacing_keeps_mines() -> void:
 	_check(cell._mine.visible, "调大间距跨过可见面阈值后，雷不该消失")
 	_scene._on_spacing_changed(100.0)
 	_check(cell._mine.visible, "再拖回原间距，雷仍在")
+
+
+## 结算细节：插错的旗打红叉；结算弹窗打开时 R 也能重开
+func _test_game_over_details() -> void:
+	_scene.board_side = 3
+	_scene.mine_count = 1
+	_scene.new_game()
+	var logic = _scene.logic
+	var mine: int = logic.index_of(Vector3i(0, 0, 0))
+	var wrong: int = logic.index_of(Vector3i(2, 2, 2))
+	logic.mines[mine] = 1
+	logic.recompute_counts()
+	logic.generated = true
+	logic.states[wrong] = BoardLogic.FLAGGED
+	_scene._refresh(wrong)
+	_scene._show_all_mines()
+	_check(_scene.cells[wrong].wrong_flag, "踩雷后插错的旗应标红叉")
+
+	_scene.result_panel.open(1.0, 3, 1, false)
+	_check(_scene.result_panel.visible, "结算弹窗应能打开")
+	var ev := InputEventKey.new()
+	ev.keycode = KEY_R
+	ev.pressed = true
+	_scene._input(ev)
+	_check(not _scene.result_panel.visible, "结算弹窗打开时按 R 直接重开")
+	_check(_scene.logic.revealed_count == 0, "R 重开后盘面应复位")
 
 
 func _check(cond: bool, msg: String) -> void:

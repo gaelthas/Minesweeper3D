@@ -8,6 +8,7 @@ extends Control
 signal closed
 ## 鼠标映射改动：HUD 的提示行要跟着重写
 signal mouse_changed
+signal guides_changed
 
 const GAP_MIN := 12
 const GAP_MAX := 55
@@ -17,10 +18,16 @@ var _res_dropdown: OptionButton
 var _res_options: Array[Vector2i] = []
 var _vol_slider: HSlider
 var _vol_label: Label
+var _distance_slider: HSlider
+var _distance_label: Label
 var _mute_button: Button
 var _mouse_dropdowns: Array[OptionButton] = []
 var _vsync_button: Button
 var _fps_button: Button
+var _axes_button: Button
+var _grid_button: Button
+var _guide_sliders: Dictionary = {}
+var _guide_labels: Dictionary = {}
 
 
 func setup() -> void:
@@ -69,10 +76,16 @@ func _build() -> void:
 
 	col.add_child(_build_mode_row())
 	col.add_child(_build_resolution_row())
+	col.add_child(_build_distance_row())
 	col.add_child(_build_volume_row())
 	col.add_child(_build_mouse_row(0, UiKit.t("左键", "LEFT")))
 	col.add_child(_build_mouse_row(1, UiKit.t("中键", "MIDDLE")))
 	col.add_child(_build_mouse_row(2, UiKit.t("右键", "RIGHT")))
+	col.add_child(_build_guides_row())
+	col.add_child(_build_guide_style_row("axis_width", UiKit.t("坐标轴粗细", "Axis width"), 1, 8))
+	col.add_child(_build_guide_style_row("axis_opacity", UiKit.t("坐标轴透明度", "Axis opacity"), 0, 100))
+	col.add_child(_build_guide_style_row("grid_width", UiKit.t("网格线粗细", "Grid width"), 1, 8))
+	col.add_child(_build_guide_style_row("grid_opacity", UiKit.t("网格线透明度", "Grid opacity"), 0, 100))
 	col.add_child(_build_toggles_row())
 	col.add_child(_build_footer())
 	_sync()
@@ -113,6 +126,24 @@ func _build_resolution_row() -> HBoxContainer:
 	return row
 
 
+## 滑块以 0.1 为步进，回调里再换算成镜头距离
+func _build_distance_row() -> HBoxContainer:
+	var row := _row_label(UiKit.t("剥离距离", "PEEL DISTANCE"))
+	_distance_slider = _make_slider(0, 400)
+	_distance_slider.value_changed.connect(_on_cutaway_distance)
+	row.add_child(_distance_slider)
+	_distance_label = _value_label()
+	row.add_child(_distance_label)
+	return row
+
+
+func _value_label() -> Label:
+	var l := UiKit.label("", 15, UiKit.INK)
+	l.custom_minimum_size = Vector2(48, 0)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	return l
+
+
 func _build_volume_row() -> HBoxContainer:
 	var row := _row_label(UiKit.t("音量", "VOLUME"))
 
@@ -149,6 +180,36 @@ func _build_mouse_row(slot: int, title: String) -> HBoxContainer:
 	ob.item_selected.connect(func(idx: int) -> void: _on_mouse_changed(slot, idx))
 	row.add_child(ob)
 	_mouse_dropdowns.append(ob)
+	return row
+
+
+func _build_guides_row() -> HBoxContainer:
+	var row := _row_label(UiKit.t("辅助线", "GUIDES"))
+
+	_axes_button = UiKit.toggle(UiKit.t("坐标轴", "Axes"), 13, 8)
+	_axes_button.custom_minimum_size = Vector2(0, 30)
+	_axes_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_axes_button.toggled.connect(_on_axes)
+	row.add_child(_axes_button)
+
+	_grid_button = UiKit.toggle(UiKit.t("方块网格", "Cube grid"), 13, 8)
+	_grid_button.custom_minimum_size = Vector2(0, 30)
+	_grid_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_grid_button.toggled.connect(_on_grid)
+	row.add_child(_grid_button)
+
+	return row
+
+
+func _build_guide_style_row(key: String, title: String, lo: int, hi: int) -> HBoxContainer:
+	var row := _row_label(title)
+	var slider := _make_slider(lo, hi)
+	slider.value_changed.connect(func(value: float) -> void: _on_guide_style(key, value))
+	row.add_child(slider)
+	var label := _value_label()
+	row.add_child(label)
+	_guide_sliders[key] = slider
+	_guide_labels[key] = label
 	return row
 
 
@@ -268,6 +329,9 @@ func _sync() -> void:
 			selected = i
 	_res_dropdown.select(selected)
 
+	_distance_slider.set_value_no_signal(AppSettings.cutaway_distance * 10.0)
+	_distance_label.text = "%.1f" % AppSettings.cutaway_distance
+
 	_vol_slider.set_value_no_signal(float(AppSettings.volume))
 	_vol_label.text = str(AppSettings.volume)
 	_mute_button.set_pressed_no_signal(AppSettings.muted)
@@ -277,6 +341,18 @@ func _sync() -> void:
 
 	_vsync_button.set_pressed_no_signal(AppSettings.vsync)
 	_fps_button.set_pressed_no_signal(AppSettings.show_fps)
+	_axes_button.set_pressed_no_signal(AppSettings.show_axes)
+	_grid_button.set_pressed_no_signal(AppSettings.show_grid)
+
+	var guide_values := {
+		"axis_width": AppSettings.axis_width,
+		"axis_opacity": AppSettings.axis_opacity,
+		"grid_width": AppSettings.grid_width,
+		"grid_opacity": AppSettings.grid_opacity,
+	}
+	for key in guide_values:
+		_guide_sliders[key].set_value_no_signal(float(guide_values[key]))
+		_guide_labels[key].text = _guide_text(key, int(guide_values[key]))
 
 
 func _on_mode(index: int) -> void:
@@ -290,6 +366,12 @@ func _on_resolution_selected(index: int) -> void:
 		return
 	AppSettings.window_size = _res_options[index]
 	AppSettings.apply()
+	AppSettings.save()
+
+
+func _on_cutaway_distance(value: float) -> void:
+	AppSettings.cutaway_distance = value / 10.0
+	_distance_label.text = "%.1f" % AppSettings.cutaway_distance
 	AppSettings.save()
 
 
@@ -316,6 +398,34 @@ func _on_vsync(pressed: bool) -> void:
 	AppSettings.vsync = pressed
 	AppSettings.apply()
 	AppSettings.save()
+
+
+func _guide_text(key: String, value: int) -> String:
+	return "%d%%" % value if key.ends_with("opacity") else str(value)
+
+
+func _on_guide_style(key: String, value: float) -> void:
+	var v := int(value)
+	match key:
+		"axis_width": AppSettings.axis_width = v
+		"axis_opacity": AppSettings.axis_opacity = v
+		"grid_width": AppSettings.grid_width = v
+		"grid_opacity": AppSettings.grid_opacity = v
+	_guide_labels[key].text = _guide_text(key, v)
+	AppSettings.save()
+	guides_changed.emit()
+
+
+func _on_axes(pressed: bool) -> void:
+	AppSettings.show_axes = pressed
+	AppSettings.save()
+	guides_changed.emit()
+
+
+func _on_grid(pressed: bool) -> void:
+	AppSettings.show_grid = pressed
+	AppSettings.save()
+	guides_changed.emit()
 
 
 func _on_fps(pressed: bool) -> void:

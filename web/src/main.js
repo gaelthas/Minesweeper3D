@@ -18,9 +18,22 @@ const defaults = {
   volume: 70,
   muted: false,
   showFps: false,
+  showAxes: false,
+  showGrid: false,
+  axisWidth: 2,
+  gridWidth: 1,
+  axisOpacity: 90,
+  gridOpacity: 30,
   spacing: 100,
+  // 镜头距离小于这个值时开始剥离，越近剥得越多
+  cutawayDistance: 15,
   mouseMap: ['reveal', 'pan', 'flag'],
 };
+
+function clampNumber(value, lo, hi, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback;
+}
 
 /* ---------------- 多语言 ---------------- */
 
@@ -85,14 +98,24 @@ async function loadSettings() {
   if (!raw) return { ...defaults };
   try {
     const saved = JSON.parse(raw);
-    return {
+    const merged = {
       ...defaults,
       ...saved,
+      cutawayDistance: clampNumber(saved.cutawayDistance, 0, 40, defaults.cutawayDistance),
+      showAxes: saved.showAxes === true,
+      showGrid: saved.showGrid === true,
+      axisWidth: clampNumber(saved.axisWidth, 1, 8, defaults.axisWidth),
+      gridWidth: clampNumber(saved.gridWidth, 1, 8, defaults.gridWidth),
+      axisOpacity: clampNumber(saved.axisOpacity, 0, 100, defaults.axisOpacity),
+      gridOpacity: clampNumber(saved.gridOpacity, 0, 100, defaults.gridOpacity),
       mouseMap:
         Array.isArray(saved.mouseMap) && saved.mouseMap.length === 3
           ? saved.mouseMap.map((a) => (ACTIONS.includes(a) ? a : 'none'))
           : [...defaults.mouseMap],
     };
+    delete merged.fadeDepth;
+    delete merged.nearOpacity;
+    return merged;
   } catch {
     return { ...defaults };
   }
@@ -208,7 +231,10 @@ function doChord(px, py) {
 function finish(won) {
   state.timing = false;
   const board = state.board;
-  if (!won) world.markMines();
+  if (!won) {
+    world.markMines();
+    world.markWrongFlags();
+  }
   ui.setTime(state.elapsed);
   sfx.play(won ? 'win' : 'boom');
   ui.showResult(won, state.elapsed, board.side, board.mineTotal, {
@@ -315,8 +341,14 @@ window.addEventListener('keydown', (e) => {
     closeTopOverlay();
     return;
   }
+  const restartKey = e.key === 'r' || e.key === 'R';
+  // 结算弹窗打开时 R 也能直接重开，不必先关弹窗或去点按钮
+  if (restartKey && ui.isResultOpen()) {
+    newGame(settings.side, settings.mines);
+    return;
+  }
   if (anyOverlayOpen()) return;
-  if (e.key === 'r' || e.key === 'R') newGame(settings.side, settings.mines);
+  if (restartKey) newGame(settings.side, settings.mines);
   else if (e.key === 'm' || e.key === 'M') {
     settings.muted = !settings.muted;
     sfx.setMuted(settings.muted);
@@ -376,7 +408,7 @@ function loop(now) {
     ui.setFps(-1);
   }
 
-  if (world) world.render();
+  if (world) world.render(dt);
   requestAnimationFrame(loop);
 }
 
@@ -432,6 +464,17 @@ async function boot() {
         settings.showFps = patch.showFps;
         ui.el.showFps.setAttribute('aria-pressed', String(patch.showFps));
       }
+      if (patch.cutawayDistance !== undefined) {
+        settings.cutawayDistance = patch.cutawayDistance;
+        world.setCutaway(settings.cutawayDistance);
+        ui.setCutawayDistance(settings.cutawayDistance);
+      }
+      if (['showAxes', 'showGrid', 'axisWidth', 'gridWidth', 'axisOpacity', 'gridOpacity']
+        .some((key) => patch[key] !== undefined)) {
+        Object.assign(settings, patch);
+        world.setGuides(settings);
+        ui.syncGuides(settings);
+      }
       if (patch.mapSlot !== undefined) {
         settings.mouseMap[patch.mapSlot] = patch.mapAction;
         updateHint();
@@ -449,8 +492,12 @@ async function boot() {
   host.onThemeChange((next) => applyTheme(next, world));
 
   world.resize();
+  world.setCutaway(settings.cutawayDistance);
+  world.setGuides(settings);
   newGame(settings.side, settings.mines);
   ui.setSpacing(settings.spacing);
+  ui.setCutawayDistance(settings.cutawayDistance);
+  ui.syncGuides(settings);
   ui.syncVolume(settings.volume);
   ui.syncMute(settings.muted);
 

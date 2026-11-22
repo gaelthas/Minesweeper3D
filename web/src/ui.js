@@ -28,8 +28,20 @@ export function createUi(handlers, t) {
     optionsPanel: $('options-panel'),
     volume: $('volume'),
     volumeValue: $('volume-value'),
+    cutawayDistance: $('cutaway-distance'),
+    cutawayDistanceValue: $('cutaway-distance-value'),
     mute: $('mute'),
     showFps: $('show-fps'),
+    showAxes: $('show-axes'),
+    showGrid: $('show-grid'),
+    axisWidth: $('axis-width'),
+    axisWidthValue: $('axis-width-value'),
+    axisOpacity: $('axis-opacity'),
+    axisOpacityValue: $('axis-opacity-value'),
+    gridWidth: $('grid-width'),
+    gridWidthValue: $('grid-width-value'),
+    gridOpacity: $('grid-opacity'),
+    gridOpacityValue: $('grid-opacity-value'),
     mapLeft: $('map-left'),
     mapMiddle: $('map-middle'),
     mapRight: $('map-right'),
@@ -74,12 +86,27 @@ export function createUi(handlers, t) {
   el.volume.addEventListener('input', () => {
     handlers.onOptions({ volume: Number(el.volume.value) });
   });
+  el.cutawayDistance.addEventListener('input', () => {
+    handlers.onOptions({ cutawayDistance: Number(el.cutawayDistance.value) / 10 });
+  });
   el.mute.addEventListener('click', () => {
     handlers.onOptions({ muted: el.mute.getAttribute('aria-pressed') !== 'true' });
   });
   el.showFps.addEventListener('click', () => {
     handlers.onOptions({ showFps: el.showFps.getAttribute('aria-pressed') !== 'true' });
   });
+  el.showAxes.addEventListener('click', () => {
+    handlers.onOptions({ showAxes: el.showAxes.getAttribute('aria-pressed') !== 'true' });
+  });
+  el.showGrid.addEventListener('click', () => {
+    handlers.onOptions({ showGrid: el.showGrid.getAttribute('aria-pressed') !== 'true' });
+  });
+  for (const [input, key] of [
+    [el.axisWidth, 'axisWidth'], [el.gridWidth, 'gridWidth'],
+    [el.axisOpacity, 'axisOpacity'], [el.gridOpacity, 'gridOpacity'],
+  ]) {
+    input.addEventListener('input', () => handlers.onOptions({ [key]: Number(input.value) }));
+  }
 
   const bindMap = (sel, slot) =>
     sel.addEventListener('change', () => handlers.onOptions({ mapSlot: slot, mapAction: sel.value }));
@@ -152,11 +179,31 @@ export function createUi(handlers, t) {
       syncBoardHint();
       el.boardPanel.hidden = false;
     },
+    setCutawayDistance(distance) {
+      el.cutawayDistance.value = String(Math.round(distance * 10));
+      el.cutawayDistanceValue.textContent = distance.toFixed(1);
+    },
+    syncGuides(s) {
+      for (const [btn, on] of [[el.showAxes, s.showAxes], [el.showGrid, s.showGrid]]) {
+        btn.setAttribute('aria-pressed', String(on));
+        btn.textContent = t(on ? 'toggleOn' : 'toggleOff');
+      }
+      el.axisWidth.value = String(s.axisWidth);
+      el.axisWidthValue.textContent = String(s.axisWidth);
+      el.gridWidth.value = String(s.gridWidth);
+      el.gridWidthValue.textContent = String(s.gridWidth);
+      el.axisOpacity.value = String(s.axisOpacity);
+      el.axisOpacityValue.textContent = `${s.axisOpacity}%`;
+      el.gridOpacity.value = String(s.gridOpacity);
+      el.gridOpacityValue.textContent = `${s.gridOpacity}%`;
+    },
     openOptions(s) {
       el.volume.value = String(s.volume);
       el.volumeValue.value = String(s.volume);
+      this.setCutawayDistance(s.cutawayDistance);
       el.mute.setAttribute('aria-pressed', String(s.muted));
       el.showFps.setAttribute('aria-pressed', String(s.showFps));
+      this.syncGuides(s);
       el.mapLeft.value = s.mouseMap[0];
       el.mapMiddle.value = s.mouseMap[1];
       el.mapRight.value = s.mouseMap[2];

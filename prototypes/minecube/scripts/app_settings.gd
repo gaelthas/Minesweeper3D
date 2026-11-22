@@ -36,6 +36,12 @@ static var volume: int = 70
 static var muted: bool = false
 static var vsync: bool = true
 static var show_fps: bool = false
+static var show_axes: bool = false
+static var show_grid: bool = false
+static var axis_width: int = 2
+static var grid_width: int = 1
+static var axis_opacity: int = 90
+static var grid_opacity: int = 30
 ## 已揭示方块相对未揭示格的收缩量：30 表示缩到 0.70。
 ## 界面上不暴露它——想看清内层靠拉大间距，而不是把方块缩小。
 const PEEK_GAP := 30
@@ -50,6 +56,9 @@ static var mouse_map: Array[int] = [MouseAction.REVEAL, MouseAction.PAN, MouseAc
 ## 方块中心距的倍率：100% 是原始格距 1.0，最大 200%。
 ## 只动位置，不动方块尺寸。
 static var spacing: int = 100
+
+## 镜头距离小于这个值时开始剥离，越近剥得越多；0 关闭
+static var cutaway_distance: float = 15.0
 
 
 static func pitch() -> float:
@@ -95,7 +104,14 @@ static func load_from_disk() -> void:
 	mouse_map[2] = clampi(int(cfg.get_value("input", "right", mouse_map[2])), 0, 4)
 	vsync = bool(cfg.get_value("display", "vsync", vsync))
 	show_fps = bool(cfg.get_value("display", "show_fps", show_fps))
+	show_axes = bool(cfg.get_value("view", "show_axes", show_axes))
+	show_grid = bool(cfg.get_value("view", "show_grid", show_grid))
+	axis_width = clampi(int(cfg.get_value("view", "axis_width", axis_width)), 1, 8)
+	grid_width = clampi(int(cfg.get_value("view", "grid_width", grid_width)), 1, 8)
+	axis_opacity = clampi(int(cfg.get_value("view", "axis_opacity", axis_opacity)), 0, 100)
+	grid_opacity = clampi(int(cfg.get_value("view", "grid_opacity", grid_opacity)), 0, 100)
 	spacing = clampi(int(cfg.get_value("view", "spacing", spacing)), 100, 200)
+	cutaway_distance = clampf(float(cfg.get_value("view", "cutaway_distance", cutaway_distance)), 0.0, 40.0)
 
 	# 换了显示器之后存档里的尺寸可能不再可用，退回默认值
 	var avail := available_resolutions()
@@ -111,6 +127,17 @@ static func save() -> void:
 	cfg.set_value("display", "vsync", vsync)
 	cfg.set_value("display", "show_fps", show_fps)
 	cfg.set_value("view", "spacing", spacing)
+	cfg.set_value("view", "cutaway_distance", cutaway_distance)
+	cfg.set_value("view", "show_axes", show_axes)
+	cfg.set_value("view", "show_grid", show_grid)
+	cfg.set_value("view", "axis_width", axis_width)
+	cfg.set_value("view", "grid_width", grid_width)
+	cfg.set_value("view", "axis_opacity", axis_opacity)
+	cfg.set_value("view", "grid_opacity", grid_opacity)
+	if cfg.has_section_key("view", "fade_depth"):
+		cfg.erase_section_key("view", "fade_depth")
+	if cfg.has_section_key("view", "near_opacity"):
+		cfg.erase_section_key("view", "near_opacity")
 	cfg.set_value("input", "left", mouse_map[0])
 	cfg.set_value("input", "middle", mouse_map[1])
 	cfg.set_value("input", "right", mouse_map[2])

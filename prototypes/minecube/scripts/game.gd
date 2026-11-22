@@ -24,6 +24,8 @@ var sfx: Sfx
 var rng := RandomNumberGenerator.new()
 
 var _board_root: Node3D
+var _axes_root: Node3D
+var _grid_root: Node3D
 var _press_pos := Vector2.ZERO
 var _dragging := false
 var _framed_side := 0
@@ -80,6 +82,7 @@ func _ready() -> void:
 	settings_page.setup()
 	overlay.add_child(settings_page)
 	settings_page.mouse_changed.connect(hud.refresh_hint)
+	settings_page.guides_changed.connect(_rebuild_guides)
 
 	result_panel = ResultPanel.new()
 	result_panel.name = "Result"
@@ -95,6 +98,7 @@ func _process(delta: float) -> void:
 		hud.set_fps(Engine.get_frames_per_second() if AppSettings.show_fps else -1)
 	if _ui_blocking():
 		return
+	_update_cutaway(delta)
 	_update_label_facing()
 	if _paused_for_settings:
 		_paused_for_settings = false
@@ -123,6 +127,63 @@ func _ui_blocking() -> bool:
 		or (result_panel != null and result_panel.visible)
 
 
+## 镜头越近剥得越多：正对某面时剥整面，接近斜角时剥整角。
+## 被剥方块沿同一方向移出视野，并关掉碰撞。
+func _update_cutaway(delta := 1.0) -> void:
+	if camera_rig == null or camera_rig.camera == null or cells.is_empty():
+		return
+	# 距离按 5 阶盘标定；大棋盘取景更远，阈值同步放大
+	var threshold := AppSettings.cutaway_distance * float(board_side) / 5.0
+	var layers := maxi(0, int(threshold - camera_rig.distance))
+	if layers <= 0:
+		for c in cells:
+			c.set_peeled(false, Vector3.ZERO)
+			c.animate_peel(delta)
+		return
+
+	var center := Vector3.ZERO
+	if is_instance_valid(_board_root):
+		center = _board_root.global_position
+	var to_cam := (camera_rig.camera.global_position - center).normalized()
+
+	var values := [to_cam.x, to_cam.y, to_cam.z]
+	var order := [0, 1, 2]
+	for i in 3:
+		for j in range(i + 1, 3):
+			if absf(values[order[j]]) > absf(values[order[i]]):
+				var tmp: int = order[i]
+				order[i] = order[j]
+				order[j] = tmp
+	var dominant: int = order[0]
+	var corner_cut := absf(values[order[1]]) >= absf(values[dominant]) * 0.6
+	var signs := [1 if values[0] >= 0.0 else -1, 1 if values[1] >= 0.0 else -1, 1 if values[2] >= 0.0 else -1]
+	var peel_dir := Vector3.ZERO
+	if corner_cut:
+		peel_dir = Vector3(signs[0], signs[1], signs[2]).normalized()
+	else:
+		peel_dir[dominant] = float(signs[dominant])
+
+	var mid := float(board_side - 1) * 0.5
+	var count := mini(layers, board_side - 1)
+	var radius := 0.0
+	for c in cells:
+		radius = maxf(radius, c.base_position.length())
+
+	var escape := camera_rig.distance + radius + 5.0
+	var offset := peel_dir * escape
+	for c in cells:
+		var p := Vector3(logic.coord_of(c.index))
+		var edge := [
+			mid - signs[0] * (p.x - mid),
+			mid - signs[1] * (p.y - mid),
+			mid - signs[2] * (p.z - mid),
+		]
+		var peeled: bool = (edge[0] < float(count) and edge[1] < float(count) and edge[2] < float(count)) \
+			if corner_cut else (edge[dominant] < float(count))
+		c.set_peeled(peeled, offset)
+		c.animate_peel(delta)
+
+
 func _update_label_facing() -> void:
 	if camera_rig == null or camera_rig.camera == null or cells.is_empty():
 		return
@@ -132,30 +193,15 @@ func _update_label_facing() -> void:
 
 
 func _build_environment() -> void:
+	# 全亮渲染：只保留背景色，不放任何灯，也不产生阴影
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.784, 0.812, 0.867)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.718, 0.761, 0.867)
-	env.ambient_light_energy = 0.36
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
-
-	var key := DirectionalLight3D.new()
-	key.rotation_degrees = Vector3(-34, -40, 0)
-	key.light_energy = 1.35
-	key.shadow_enabled = true
-	key.directional_shadow_max_distance = 60.0
-	add_child(key)
-
-	var fill := DirectionalLight3D.new()
-	fill.rotation_degrees = Vector3(-16, 148, 0)
-	fill.light_energy = 0.45
-	fill.light_color = Color(0.78, 0.85, 1.0)
-	add_child(fill)
 
 
 func new_game() -> void:
@@ -184,6 +230,7 @@ func new_game() -> void:
 				var cell := CellView.new(idx)
 				cell.name = "Cell_%d" % idx
 				cell.position = origin + Vector3(x, y, z) * AppSettings.pitch()
+				cell.set_base_position(cell.position)
 				_board_root.add_child(cell)
 				cells.append(cell)
 
@@ -203,6 +250,7 @@ func new_game() -> void:
 	_update_level_text()
 	hud.update_stats(logic.mine_total, 0, 0, logic.cell_count() - logic.mine_total)
 	hud.set_status(hud.t("点击任意方块开始", "click any cube to begin"))
+	_rebuild_guides()
 
 
 func _update_level_text() -> void:
@@ -351,6 +399,11 @@ func _input(event: InputEvent) -> void:
 
 	if k.keycode == KEY_ESCAPE:
 		_close_top_overlay()
+		return
+
+	# 结算弹窗打开时 R 也能直接重开，不必先关弹窗
+	if k.keycode == KEY_R and result_panel != null and result_panel.visible:
+		_on_restart()
 		return
 
 	if _ui_blocking():
@@ -521,7 +574,99 @@ func _relayout_cells() -> void:
 		-(size.z - 1) * 0.5 * pitch)
 	for c in cells:
 		var p := logic.coord_of(c.index)
-		c.position = origin + Vector3(p) * pitch
+		c.set_base_position(origin + Vector3(p) * pitch)
+	_rebuild_guides()
+
+
+func _guide_material(color: Color, alpha: float) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(color.r, color.g, color.b, alpha)
+	return mat
+
+
+func _guide_size(width: int) -> float:
+	return float(width) * 0.01
+
+
+func _segment_transform(from: Vector3, to: Vector3, width: int) -> Transform3D:
+	var delta := to - from
+	var length := delta.length()
+	var y := delta.normalized()
+	var ref := Vector3.FORWARD if absf(y.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT
+	var x := ref.cross(y).normalized()
+	var z := y.cross(x).normalized()
+	var size := _guide_size(width)
+	var basis := Basis(x * size, y * length, z * size)
+	return Transform3D(basis, (from + to) * 0.5)
+
+
+func _guide_cylinder() -> CylinderMesh:
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 0.5
+	mesh.bottom_radius = 0.5
+	mesh.height = 1.0
+	mesh.radial_segments = 6
+	return mesh
+
+
+func _make_guide_line(from: Vector3, to: Vector3, color: Color, alpha: float, width: int) -> MeshInstance3D:
+	var line := MeshInstance3D.new()
+	line.mesh = _guide_cylinder()
+	line.material_override = _guide_material(color, alpha)
+	line.transform = _segment_transform(from, to, width)
+	return line
+
+
+func _rebuild_guides() -> void:
+	if logic == null or _board_root == null:
+		return
+	for node in [_axes_root, _grid_root]:
+		if is_instance_valid(node):
+			node.queue_free()
+	_axes_root = Node3D.new()
+	_grid_root = Node3D.new()
+	_board_root.add_child(_axes_root)
+	_board_root.add_child(_grid_root)
+
+	var pitch := AppSettings.pitch()
+	var extent := float(board_side) * pitch * 0.5 + pitch * 0.25
+	var axis_alpha := float(AppSettings.axis_opacity) / 100.0
+	_axes_root.add_child(_make_guide_line(Vector3.LEFT * extent, Vector3.RIGHT * extent,
+		Color(0.90, 0.28, 0.30), axis_alpha, AppSettings.axis_width))
+	_axes_root.add_child(_make_guide_line(Vector3.DOWN * extent, Vector3.UP * extent,
+		Color(0.29, 0.73, 0.41), axis_alpha, AppSettings.axis_width))
+	_axes_root.add_child(_make_guide_line(Vector3.BACK * extent, Vector3.FORWARD * extent,
+		Color(0.31, 0.50, 0.91), axis_alpha, AppSettings.axis_width))
+
+	var half := float(board_side) * pitch * 0.5
+	var count := 3 * (board_side + 1) * (board_side + 1)
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.mesh = _guide_cylinder()
+	multi.instance_count = count
+	var k := 0
+	for a in board_side + 1:
+		var u := -half + float(a) * pitch
+		for b in board_side + 1:
+			var v := -half + float(b) * pitch
+			multi.set_instance_transform(k, _segment_transform(Vector3(-half, u, v), Vector3(half, u, v), AppSettings.grid_width))
+			multi.set_instance_transform(k + 1, _segment_transform(Vector3(u, -half, v), Vector3(u, half, v), AppSettings.grid_width))
+			multi.set_instance_transform(k + 2, _segment_transform(Vector3(u, v, -half), Vector3(u, v, half), AppSettings.grid_width))
+			k += 3
+	var grid := MultiMeshInstance3D.new()
+	grid.multimesh = multi
+	grid.material_override = _guide_material(Color(0.60, 0.66, 0.75), float(AppSettings.grid_opacity) / 100.0)
+	_grid_root.add_child(grid)
+	_sync_guides()
+
+
+func _sync_guides() -> void:
+	if is_instance_valid(_axes_root):
+		_axes_root.visible = AppSettings.show_axes
+	if is_instance_valid(_grid_root):
+		_grid_root.visible = AppSettings.show_grid
 
 
 func _refresh(i: int) -> void:
@@ -581,6 +726,9 @@ func _show_all_mines() -> void:
 			if logic.states[i] == BoardLogic.FLAGGED:
 				continue
 			cells[i].set_mine(i == logic.hit_index)
-		elif logic.states[i] == BoardLogic.FLAGGED or logic.states[i] == BoardLogic.QUESTION:
-			# 插错或标了问号的格子：直接翻出底下的数字，让玩家看见自己错在哪
+		elif logic.states[i] == BoardLogic.FLAGGED:
+			# 插错的旗保留下来并打红叉，让玩家一眼看到错在哪
+			cells[i].mark_wrong_flag()
+		elif logic.states[i] == BoardLogic.QUESTION:
+			# 问号则翻出底下的数字
 			cells[i].apply(BoardLogic.REVEALED, logic.counts[i], _face_mask(i), logic.face_counts_of(i))

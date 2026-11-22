@@ -60,6 +60,22 @@ export function makeFlagTexture() {
   });
 }
 
+/** 结算时标出插错的旗：红色叉 */
+export function makeWrongTexture() {
+  return canvasTexture(256, (ctx, s) => {
+    ctx.clearRect(0, 0, s, s);
+    ctx.strokeStyle = '#E5484D';
+    ctx.lineWidth = s * 0.13;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(s * 0.24, s * 0.24);
+    ctx.lineTo(s * 0.76, s * 0.76);
+    ctx.moveTo(s * 0.76, s * 0.24);
+    ctx.lineTo(s * 0.24, s * 0.76);
+    ctx.stroke();
+  });
+}
+
 /** 问号 */
 export function makeQuestionTexture() {
   return canvasTexture(256, (ctx, s) => {
